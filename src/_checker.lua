@@ -179,7 +179,6 @@ function c.options(ttype, locales, options)
 		v = nil;
 	end;
 	if t == "nu" or t == "dt" or t == "rt" then
-		print()
 		check_property(ret, options, 'g/numberingSystem', valid_value_property["g/numberingSystem"][table.find(valid_value_property["g/numberingSystem"], locale.numberingSystem)] or data.numbers.defaultNumberingSystem);
 		if t ~= "dt" then
 			ret.numberOptions = t == "nu" and ret or { style = "decimal" };
