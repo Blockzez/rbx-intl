@@ -68,11 +68,18 @@ local function format_pattern(self, start, value, pattern, negt, compact)
 		elseif v == 5 then
 			ret = ret .. self.symbols.perMille;
 		elseif v == 6 then
-			if self.currencyData then
-				ret = checker.addpart(ret, "currency", (self.currencyDisplay == "narrowSymbol" and self.currencyData['symbol-alt-narrow']) or self.currencyData.symbol or self.currency);
-			else
-				ret = checker.addpart(ret, "currency", (self.currency and self.currency:upper() or '¤'));
+			local symbol = (self.currencyData and ((self.currencyDisplay == "narrowSymbol" and self.currencyData['symbol-alt-narrow'])
+				or (self.currencyDisplay == "symbol" and self.currencyData.symbol)))
+				or (self.currency or '¤');
+			-- Not sure how currency spacing works, apologies but I'm going to assume, currency match is "[:^S:]" and surrounding match is "[:digit:]"
+			-- If anyone can tell me how the pattern works, please tell me.
+			if (pattern[i + 1] == 0) and symbol:match("%a$") then
+				symbol = symbol .. (self.currencySpacing and self.currencySpacing.afterCurrency.insertBetween or " ");
 			end;
+			if (pattern[i - 1] == 0) and symbol:match("^%a") then
+				symbol = (self.currencySpacing and self.currencySpacing.beforeCurrency.insertBetween or " ") .. symbol;
+			end;
+			ret = checker.addpart(ret, "currency", symbol);
 		else
 			if compact then
 				if type(ret) == "string" then
@@ -112,7 +119,7 @@ function format(self, parts, value)
 	local standardPattern = self.standardPattern;
 	local standardDecimalPattern;
 	local expt;
-	local negt, post = value:match("([+%-]?)(.+)");
+	local negt, post = value:match("^([+%-]?)(.+)$");
 	if post:match("^[%d.]*$") then
 		local minfrac, maxfrac = self.minimumFractionDigits, self.maximumFractionDigits;
 		if self.isSignificant then
@@ -131,7 +138,7 @@ function format(self, parts, value)
 				post = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
 				intlen = math.min(intlen, 12);
 			-- The '0' pattern indicates no compact number available
-			elseif (self.style == "currency" and self.currencyDisplay == "symbol") or self.style == "percent" then
+			elseif (self.style == "currency" and (self.currencyDisplay ~= "name")) or self.style == "percent" then
 				standardPattern = self.standardNPattern;
 			end;
 			if not (minfrac or maxfrac) then
@@ -173,7 +180,7 @@ function format(self, parts, value)
 		--[=[ Standard formatting ]=]--
 		local intg, frac = post:match("^(%d*)%.?(%d*)$");
 		local gs = (self.standardNPattern or standardPattern).metadata.integerGroupSize;
-		if (self.useGrouping) and (gs) and (#intg >= gs[1] + self.minimumGroupingDigits) then
+		if (self.minimumGroupingDigits > 0) and (gs) and (#intg >= gs[1] + self.minimumGroupingDigits) then
 			local sym = ((self.style == "currency" and self.symbols.currencyGroup) or self.symbols.group);
 			local ret, rem =
 				parts
@@ -183,8 +190,8 @@ function format(self, parts, value)
 			while #rem > gs[2] do
 				ret, rem =
 					checker.addtofirstpart('group', sym,
-						checker.addtofirstpart("integer", checker.substitute(rem:sub(-gs[1]), self.numberingSystem), ret)),
-					rem:sub(1, -(gs[1] + 1));
+						checker.addtofirstpart("integer", checker.substitute(rem:sub(-gs[2]), self.numberingSystem), ret)),
+					rem:sub(1, -(gs[2] + 1));
 			end;
 			intg = checker.addtofirstpart("integer", checker.substitute(rem, self.numberingSystem), ret);
 		elseif parts then
@@ -250,15 +257,21 @@ function format(self, parts, value)
 	end;
 	
 	--[=[ Unit ]=]--
-	if self.style ~= "unit" and (self.style ~= "currency" or self.currencyDisplay == "symbol" or self.currencyDisplay == "narrowSymbol") then
+	if self.style ~= "unit" and (self.style ~= "currency" or self.currencyDisplay ~= "name") then
 		return parts and setmetatable(standard, nil) or standard;
 	end;
 	local unitPattern = checker.negotiate_plural_table(self.unitPattern, 'unitPattern-count-', '', self.pluralRule, standard);
-	local currencyName = (self.currencyDisplay == "name") and (self.currencyData and checker.negotiate_plural_table(self.currencyData, 'displayName-count-', '', self.pluralRule, standard)) or self.currency;
-	if parts then
-		return setmetatable(checker.formattoparts(self.style == "unit" and "unit", checker.initializepart(), unitPattern, nil, standard, currencyName and { type = "currency", value = currencyName }));
+	local currencyName = (self.currencyData and checker.negotiate_plural_table(self.currencyData, 'displayName-count-', '', self.pluralRule, standard));
+	local unit0 = parts and checker.formattoparts(self.style == "unit" and "unit", checker.initializepart(), unitPattern, nil, standard, currencyName and { type = "currency", value = currencyName })
+		or (unitPattern:gsub('{0}', standard):gsub('{1}', currencyName or '{1}'));
+	if not self.compoundUnitPattern then
+		return parts and setmetatable(unit0, nil) or unit0;
 	end;
-	return (unitPattern:gsub('{0}', standard):gsub('{1}', currencyName or '{1}'));
+	if self.unitPattern1.perUnitPattern then
+		return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, nil, unit0), nil) or (self.unitPattern1.perUnitPattern:gsub('{0}', unit0));
+	end;
+	local unit1 = checker.negotiate_plural_table(self.unitPattern1, 'unitPattern-count-', '', self.pluralRule, 1):gsub('%s*{0}%s*', '');
+	return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, nil, unit0, unit1), nil) or (self.compoundUnitPattern:gsub('{0}', unit0):gsub('{1}', unit1));
 end;
 
 local methods = checker.initalize_class_methods(intl_proxy);
