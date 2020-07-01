@@ -1,6 +1,6 @@
 local _data = script.Parent:WaitForChild("_data");
 local _coredata = require(_data:WaitForChild("_core"));
-local _cache = { };
+local _cache = setmetatable({ }, { __mode = 'v' });
 local d = { };
 
 local function title_case_gsub(first, other)
@@ -45,15 +45,16 @@ function d.getlocaleparts(locale)
 end;
 function d.rawmaximize(locale, exclude_und)
 	local language, script, region, variant = d.getlocaleparts(locale);
+	local language_script = script and (language .. '-' .. script);
 	local ret0, ret1, ret2;
 	if region then
 		if script then
-			ret0 = _coredata.likelySubtags[language .. '-' .. script .. '-' .. region];
+			ret0 = _coredata.likelySubtags[language_script .. '-' .. region];
 		end;
 		ret1 = _coredata.likelySubtags[language .. '-' .. region];
 	end;
 	if script then
-		ret2 = _coredata.likelySubtags[language .. '-' .. script];
+		ret2 = _coredata.likelySubtags[language_script];
 	end;
 	local ret_language, ret_script, ret_region = d.getlocaleparts(ret0 or ret1 or ret2 or _coredata.likelySubtags[language] or locale);
 	if language and (exclude_und or language ~= 'und') then
@@ -84,33 +85,36 @@ end;
 
 function d.rawminimize(locale)
 	local language, script, region, variant = d.getlocaleparts(locale);
-	local ret0, ret1, ret2;
+	local ret0, ret1, ret2, ret3, ret4;
+	local language_script = script and (language .. '-' .. script);
+	local language_region = region and (language .. '-' .. region);
 	if region then
 		if script then
-			ret0 = reverseLikelySubtags[language .. '-' .. script .. '-' .. region];
+			ret0 = reverseLikelySubtags[language_script .. '-' .. region];
+		else
+			ret3 = reverseLikelySubtags[d.maximizestr(language_region)];
 		end;
-		ret1 = reverseLikelySubtags[language .. '-' .. region]
+		ret1 = reverseLikelySubtags[language_region]
 		if (not ret1) and script then
-			ret1 = d.minimizestr(language .. '-' .. region);
-			if ret1 == (language .. '-' .. region) then
+			ret1 = d.minimizestr(language_region);
+			if ret1 == (language_region) then
 				ret1 = nil;
-			else
-				reverseLikelySubtags[language .. '-' .. region] = ret1;
 			end;
 		end;
 	end;
 	if script then
-		ret2 = reverseLikelySubtags[language .. '-' .. script] or (region and d.minimizestr(language .. '-' .. region));
+		ret2 = reverseLikelySubtags[language_script] or (region and d.minimizestr(language_region));
 		if (not ret2) and region then
-			ret2 = d.minimizestr(language .. '-' .. script);
-			if ret2 == (language .. '-' .. script) then
+			ret2 = d.minimizestr(language_script);
+			if ret2 == (language_script) then
 				ret2 = nil;
-			else
-				reverseLikelySubtags[language .. '-' .. script] = ret2;
 			end;
 		end;
+		if not region then
+			ret4 = reverseLikelySubtags[d.maximizestr(language_script)];
+		end;
 	end;
-	local ret_language, ret_script, ret_region = d.getlocaleparts(ret0 or ret1 or ret2 or language);
+	local ret_language, ret_script, ret_region = d.getlocaleparts(ret0 or ret1 or ret2 or ret3 or ret4 or language);
 	if (ret_language == "und") then
 		ret_language = language;
 	end;
@@ -171,13 +175,19 @@ local function deepcopymerge(t0, t1, level)
 	end;
 	return copy;
 end;
-]]--
+]]
 
+local localedataproxy = setmetatable({ }, { __mode = 'k' });
+local function localedataindex(self, index)
+	return localedataproxy[self][index];
+end;
 local function requireifnotnil(inst)
 	if inst then
 		local localedata = newproxy(true);
+		localedataproxy[localedata] = require(inst);
 		local localedata_mt = getmetatable(localedata);
-		localedata_mt.__index = require(inst);
+		localedata_mt.__index = localedataindex;
+		localedata_mt.__metatable = "The metatable is locked";
 		return localedata;
 	end;
 	return nil;
@@ -188,13 +198,14 @@ function d.getdata(locale)
 		return nil;
 	end;
 	locale = d.getlocalename(locale);
+	
+	local minimized, maximized = d.minimizestr(locale), d.maximizestr(locale);
 	if _cache[locale] == nil then
-		local ms = requireifnotnil(_data:FindFirstChild(locale));
+		local ms = requireifnotnil(_data:FindFirstChild(minimized)) or requireifnotnil(_data:FindFirstChild(maximized));
 		if ms then
 			_cache[locale] = ms;
 		else
-			local parent = d.negotiateparent(locale);
-			_cache[locale] = d.getdata(parent) or false;
+			_cache[locale] = d.getdata(d.negotiateparent(minimized)) or requireifnotnil(_data:FindFirstChild(d.negotiateparent(maximized) or '')) or false;
 		end;
 	end;
 	return _cache[locale];
