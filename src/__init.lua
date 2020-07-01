@@ -1,5 +1,5 @@
 --[=[
-	Version 2.0.1
+	Version 2.1.0
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -94,8 +94,8 @@ function modules.extendedTestFormat(locale)
 		modules.NumberFormat.new(locale, { style = "percent", maximumSignificantDigits = 3 }):Format(2 / 3),
 		modules.NumberFormat.new(locale):Format(76543456765876),
 		
-		modules.NumberFormat.new(locale, { style = 'unit', unit = "length-inch", unitDisplay = "long" }):Format(1),
-		modules.NumberFormat.new(locale, { style = "unit", unit = "length-inch", unitDisplay = "long", notation = "compact", compactDisplay = "long" }):Format(1234)
+		modules.NumberFormat.new(locale, { style = 'unit', unit = "inch", unitDisplay = "long" }):Format(1),
+		modules.NumberFormat.new(locale, { style = "unit", unit = "inch", unitDisplay = "long", notation = "compact", compactDisplay = "long" }):Format(1234)
 	);
 end;
 
@@ -121,7 +121,9 @@ local function gettype(v)
 		if success and value then
 			return 'number', value;
 		end;
-		return 'list', v;
+		if (t == "table") then
+			return 'list', v;
+		end;
 	elseif t == "DateTime" then
 		t = 'date';
 	end;
@@ -147,7 +149,7 @@ function modules.toLocaleString(...)
 		return modules.DisplayNames.new(locale, options):Format(value);
 	elseif type == 'list' then
 		return modules.ListFormat.new(locale, options):Format(value);
-	elseif type == 'function' or type == 'thread' then
+	elseif type == 'function' or type == 'thread' or type == "userdata" then
 		return '';
 	end;
 	return tostring(value);
