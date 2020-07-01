@@ -86,8 +86,12 @@ local function of(self, code)
 		end;
 		return parselangugage(self.data, self.pattern, code, self.style, self.fallback == "code");
 	end;
+	if type(code) ~= "string" then
+		error("invalid argument #3 (string expected got " .. typeof(code) .. ')', 4);
+	end;
+	code = checkvalid(code, self.type);
 	local ret = negotiate_table(self.data, code, self.style) or (self.fallback == "code" and code) or nil;
-	if self.type == "currency" then
+	if self.type == "currency" and type(ret) == "table" then
 		return ret.displayName;
 	end;
 	return ret;
