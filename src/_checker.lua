@@ -61,7 +61,7 @@ local valid_value_property =
 	["nu/signDisplay"] = { "auto", "never", "always", "exceptZero" },
 	["nu/style"] = { "decimal", "currency", "percent", "unit" },
 	["nu/unitDisplay"] = "%display1",
-	["nu/useGrouping"] = "f/bool",
+	["nu/useGrouping"] = { "min2", "auto", "always", "never", true, false },
 	["nu/minimumIntegerDigits"] = "f/1..",
 	["nu/maximumIntegerDigits"] = "f/minimumIntegerDigits..",
 	["nu/minimumFractionDigits"] = "f/0..",
@@ -70,7 +70,7 @@ local valid_value_property =
 	["nu/maximumSignificantDigits"] = "f/minimumSignificantDigits..",
 	["nu/currency"] = "lp/^%a%a%a$",
 	["nu/unit"] = "f/str",
-	["nu/midpointRounding"] = { 'toEven', 'awayFromZero', 'toZero', 'toNegativeInfinity', 'toPositiveInfinity' },
+	["nu/rounding"] = { "halfUp", "halfEven", "halfDown", "ceiling", "floor" },
 	
 	["pr/type"] = { 'cardinal', 'ordinal' },
 	
@@ -129,8 +129,6 @@ local function check_property(tbl_out, tbl_to_check, property, default)
 	error(property .. " value is out of range.", 4);
 end;
 
-local unit_types = { '', 'acceleration', 'angle', 'area', 'concentr', 'consumption', 'digital', 'duration', 'electric', 'energy', 'force', 'frequency', 'graphics', 'length', 'light', 'mass', 'power', 'pressure', 'speed', 'temperature', 'torque', 'volume' };
-
 local day_period_rule = localedata.coredata.dayPeriodRuleSet;
 local time_data = localedata.coredata.timeData;
 
@@ -154,7 +152,7 @@ function c.negotiatelocale(locales)
 			error("Incorrect locale information provided", 3);
 		end;
 		locale = Locale._private.intl_proxy[locale] and locale or Locale.new(locale);
-		data = localedata.getdata(localedata.minimizestr(localedata.getlocalename(locale)));
+		data = localedata.getdata(localedata.getlocalename(locale));
 		if data then
 			locales = locale;
 			break;
@@ -182,10 +180,14 @@ function c.options(ttype, locales, options)
 		check_property(ret, options, 'g/numberingSystem', valid_value_property["g/numberingSystem"][table.find(valid_value_property["g/numberingSystem"], locale.numberingSystem)] or data.numbers.defaultNumberingSystem);
 		if t ~= "dt" then
 			ret.numberOptions = t == "nu" and ret or { style = "decimal" };
-			check_property(ret.numberOptions, options, 'nu/useGrouping', true);
 			check_property(ret.numberOptions, options, 'nu/signDisplay', 'auto');
 			check_property(ret.numberOptions, options, 'nu/compactDisplay', 'short');
 			check_property(ret.numberOptions, options, 'nu/notation', 'standard');
+			
+			check_property(ret.numberOptions, options, 'nu/useGrouping', (ret.notation == "compact") and "min2" or "auto");
+			if type(ret.useGrouping) == "boolean" then
+				ret.useGrouping = ret.useGrouping and 'always' or 'never';
+			end;
 			if ret.numberOptions == ret then
 				ret.numberOptions = nil;
 			end;
@@ -205,36 +207,44 @@ function c.options(ttype, locales, options)
 		check_property(ret, options, 'nu/style', 'decimal');
 		
 		if ret.style == "currency" then
-			check_property(ret, options, 'nu/currency', 'error: Currency code is required with currency style.');
+			check_property(ret, options, 'nu/currency', 'error: Currency code is required with currency style');
 			check_property(ret, options, 'nu/currencyDisplay', 'symbol');
 			check_property(ret, options, 'nu/currencySign', 'standard');
+			ret.currency = ret.currency:upper();
 		elseif ret.style == "unit" then
 			check_property(ret, options, 'nu/unit', 'error: The unit is required with unit style');
-			check_property(ret, options, 'nu/unitDisplay', 'long');
+			check_property(ret, options, 'nu/unitDisplay', 'short');
 		end;
 		
 		local numbers = data.numbers;
 		ret.symbols = c.negotiate_numbering_system(numbers, 'symbols-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
-		ret.minimumGroupingDigits = (ret.notation == "compact" and math.max(numbers.minimumGroupingDigits, 2) or numbers.minimumGroupingDigits);
+		ret.minimumGroupingDigits = (ret.useGrouping == "min2" and 2) or (ret.useGrouping == "always" and 1) or (ret.useGrouping == "never" and 0) or numbers.minimumGroupingDigits;
 		
 		local decimalPattern = c.negotiate_numbering_system(numbers, ((ret.style == "percent" and ret.notation ~= "compact") and 'percent' or 'decimal') .. 'Formats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
-		if ret.style == "currency" and (ret.currencyDisplay == "symbol" or ret.currencyDisplay == "narrowSymbol") then
+		if ret.style == "currency" and (ret.currencyDisplay ~= "name") then
 			if ret.notation == "compact" then
 				ret.standardPattern = decimalPattern.standard;
 			end;
 			local currencyFormat = c.negotiate_numbering_system(numbers, 'currencyFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
 			ret[ret.notation == "compact" and 'standardNPattern' or 'standardPattern'] = currencyFormat[ret.currencySign] or currencyFormat.standard;
 			ret.currencyData = numbers.currencies and numbers.currencies[ret.currency];
+			ret.currencySpacing = currencyFormat.currencySpacing;
 		else
 			ret.standardPattern = decimalPattern.standard;
 		end;
-		if ret.style == "unit" or (ret.style == "currency" and ret.currencyDisplay ~= "symbol" and ret.currencyDisplay ~= "narrowSymbol") then
+		if ret.style == "unit" or (ret.style == "currency" and ret.currencyDisplay == "name") then
 			if ret.style == "unit" then
-				for _, unit_type in ipairs(unit_types) do
-					ret.unitPattern = data.units[ret.unitDisplay][unit_type .. (unit_type == '' and '' or '-') .. ret.unit];
-					if ret.unitPattern then
-						break;
+				local availableUnits = data.units[ret.unitDisplay];
+				ret.unitPattern = availableUnits[ret.unit];
+				if not ret.unitPattern then
+					local unit0, unit1 = unpack(ret.unit:split('-per-'));
+					if availableUnits[unit1] then
+						ret.unitPattern1 = availableUnits[unit1];
+						if availableUnits[unit0] then
+							ret.unitPattern = availableUnits[unit0];
+						end;
 					end;
+					ret.compoundUnitPattern = availableUnits.per.compoundUnitPattern;
 				end;
 				if not ret.unitPattern then
 					error("Invalid unit argument for this locale '" .. ret.unit .. "'", 3);
@@ -248,7 +258,7 @@ function c.options(ttype, locales, options)
 			ret.standardNPattern = c.negotiate_numbering_system(numbers, 'percentFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn').standard;
 		end;
 		if ret.notation == "compact" then
-			if ret.style == "currency" and (ret.currencyDisplay == "symbol" or ret.currencyDisplay == "narrowSymbol") then
+			if ret.style == "currency" and (ret.currencyDisplay ~= "name") then
 				ret.compactPattern = c.negotiate_numbering_system_index('short', numbers, 'currencyFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn').standard;
 			else
 				ret.compactPattern = decimalPattern[ret.compactDisplay].decimalFormat;
@@ -303,10 +313,10 @@ function c.options(ttype, locales, options)
 		local p = data.listPatterns["listPattern-type-" .. (ret.type:gsub('disjunction', 'or'):gsub('conjunction', 'standard'))
 			.. (ret.style == "long" and '' or ('-' .. ret.style))];
 		ret.pattern = p;
-		ret.t, ret.s, ret.m, ret.e = c.tokenizeformat(p['2']), c.tokenizeformat(p['start']), c.tokenizeformat(p['middle']), c.tokenizeformat(p['end'])
+		ret.t, ret.s, ret.m, ret.e = c.tokenizeformat(p['2']), c.tokenizeformat(p['start']), c.tokenizeformat(p['middle']), c.tokenizeformat(p['end']);
 	end;
 	if t == "nu" or t == "pr" or t == "rt" then
-		check_property(ret, options, 'nu/midpointRounding', (ret.notation == "compact") and 'toNegativeInfinity' or 'toEven');
+		check_property(ret, options, 'nu/rounding', 'halfEven');
 		ret.isSignificant = not not (rawget(options, 'minimumSignificantDigits') or rawget(options, 'maximumSignificantDigits'));
 		if ret.isSignificant then
 			check_property(ret, options, 'nu/minimumSignificantDigits', 1);
@@ -492,7 +502,7 @@ end;
 --
 
 function c.negotiate_plural_table(tbl, prefix, suffix, plural_rule, value)
-	return tbl[prefix .. plural_rule:Select(value) .. suffix] or tbl[prefix .. 'other' .. suffix];
+	return tbl[prefix .. value .. suffix] or tbl[prefix .. plural_rule:Select(value) .. suffix] or tbl[prefix .. 'other' .. suffix];
 end;
 
 function c.negotiate_numbering_system(tbl, prefix, suffix, ...)
@@ -553,9 +563,9 @@ local function quantize(val, exp, rounding)
 		return negt .. post:sub(2);
 	end;
 	d = d:split('');
-	local add = rounding == 'toPositiveInfinity';
-	if rounding ~= "toPositiveInfinity" and rounding ~= "toNegativeInfinity" then
-		add = d[pos]:match(((rounding == "toEven" and (d[pos - 1] or '0'):match('[02468]')) or rounding == "toFromZero") and '[6-9]' or '[5-9]');
+	local add = rounding == 'ceiling';
+	if rounding ~= "ceiling" and rounding ~= "floor" then
+		add = d[pos]:match(((rounding == "halfEven" and (d[pos - 1] or '0'):match('[02468]')) or rounding == "halfDown") and '[6-9]' or '[5-9]');
 	end;
 	for p = pos, #d do
 		d[p] = 0
@@ -612,7 +622,10 @@ function c.raw_format_sig(val, min, max, rounding)
 	return intg .. '.' .. frac;
 end;
 function c.parse_exp(val)
-	local val, exp = val:match('(%d*[.,]?%d*)[eE]([-+]?%d+)');
+	if not val:find('[eE]') then
+		return val;
+	end;
+	local val, exp = val:match('^(%d*%.?%d*)[eE]([-+]?%d+)$');
 	if val then
 		exp = tonumber(exp);
 		if not exp then
