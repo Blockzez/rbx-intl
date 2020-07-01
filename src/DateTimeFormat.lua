@@ -446,6 +446,19 @@ local function format_pattern(self, start, pattern, parts, info0, info1, source_
 end;
 
 local function format(self, parts, date0, date1)
+	if type(date0) == "number" then
+		date0 = os.date('!*t', date0);
+	elseif date0 == nil then
+		date0 = os.date('!*t');
+	elseif typeof(date0) ~= "userdata" and type(date0) ~= "table" then
+		error("invalid argument #2 (date expected, got " .. typeof(date0) .. ')', 4);
+	end;
+	if type(date1) == "number" then
+		date1 = os.date('!*t', date1);
+	elseif date1 ~= nil and typeof(date1) ~= "userdata" and type(date1) ~= "table" then
+		error("invalid argument #2 (date expected, got " .. typeof(date1) .. ')', 4);
+	end;
+	
 	local range = false;
 	if date1 and compare_datetime_table(date0, date1) ~= 0 then
 		range = true;
@@ -548,7 +561,7 @@ function methods:FormatRange(...)
 		error("Missing argument #".. (len + 1) .." (date expected)", 2);
 	end;
 	local date0, date1 = ...;
-	return format(self, false, date0, date1);
+	return format(self, false, date0, (date1 == nil) and os.date('!*t') or date1);
 end;
 function methods:FormatRangeToParts(...)
 	local len = select('#', ...);
@@ -556,7 +569,7 @@ function methods:FormatRangeToParts(...)
 		error("Missing argument #".. (len + 1) .." (date expected)", 2);
 	end;
 	local date0, date1 = ...;
-	return setmetatable(format(self, true, date0, date1), nil);
+	return setmetatable(format(self, true, date0, (date1 == nil) and os.date('!*t') or date1), nil);
 end;
 
 function methods:ResolvedOptions()
