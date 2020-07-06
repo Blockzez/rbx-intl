@@ -122,10 +122,12 @@ function format(self, parts, value)
 	local negt, post = value:match("^([+%-]?)(.+)$");
 	if post:match("^[%d.]*$") then
 		local minfrac, maxfrac = self.minimumFractionDigits, self.maximumFractionDigits;
-		if self.isSignificant then
-			post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.midpointRounding);
-		else
-			post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.midpointRounding);
+		if self.notation == "standard" or self.notation == "compact" then
+			if self.isSignificant then
+				post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+			else
+				post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+			end;
 		end;
 		
 		if self.notation == "compact" then
@@ -146,9 +148,9 @@ function format(self, parts, value)
 			end;
 			
 			if self.isSignificant then
-				post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.midpointRounding);
+				post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 			else
-				post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.midpointRounding);
+				post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 			end;
 			
 			if self.compactPattern.other[intlen] then
@@ -156,8 +158,11 @@ function format(self, parts, value)
 			end;
 		elseif self.notation ~= "standard" then
 			post, expt = exp(post):match("^(%d*%.?%d*)E(%d*)$");
-			if not (minfrac or maxfrac) then
-				maxfrac = 3;
+			
+			if self.isSignificant then
+				post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+			else
+				post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 			end;
 		end;
 	elseif post == "nan" or post == "nan(ind)" then
@@ -223,9 +228,9 @@ function format(self, parts, value)
 				table.remove(post, 2);
 			end;
 		else
-			post = checker.substitute(post, intg)
-				.. ((self.style == "currency" and self.symbols.currencyDecimal) or self.symbols.decimal)
-				.. checker.substitute(post, frac)
+			post = checker.substitute(intg, self.numberingSystem)
+				.. (frac == '' and '' or ((self.style == "currency" and self.symbols.currencyDecimal) or self.symbols.decimal))
+				.. (frac == '' and '' or checker.substitute(frac, self.numberingSystem))
 				.. self.symbols.exponential
 				.. checker.substitute(expt, self.numberingSystem);
 		end;
@@ -314,7 +319,7 @@ function methods:ResolvedOptions()
 		ret.minimumFractionDigits = self.minimumFractionDigits;
 		ret.maximumFractionDigits = self.maximumFractionDigits;
 	end;
-	ret.midpointRounding = self.midpointRounding;
+	ret.rounding = self.rounding;
 	return ret;
 end;
 
