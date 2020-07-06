@@ -1,5 +1,5 @@
 --[=[
-	Version 2.1.0
+	Version 2.1.1
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -58,7 +58,7 @@ r("ListFormat");
 
 function modules.testFormat(locale)
 	return ("%s\n%s\n%s    %s"):format(
-		modules.DateTimeFormat.new(locale, { timeStyle = "short" }):Format{year = 1, month = 1, day = 1, hour = 12, min = 34},
+		modules.DateTimeFormat.new(locale, { timeStyle = "short" }):Format{year = 1, month = 1, day = 1, hour = 0, min = 34},
 		modules.DateTimeFormat.new(locale, { dateStyle = "full" }):Format{year = 2012, month = 3, day = 4},
 		modules.NumberFormat.new(locale, { style = "currency", currency = "EUR" }):Format('1234.56'),
 		modules.NumberFormat.new(locale):Format('4567.89')
