@@ -9,6 +9,9 @@ dn._private =
 };
 
 local function negotiate_table(tbl, index, style)
+	if index == nil then
+		return nil;
+	end;
 	return (style == "narrow" and tbl[index .. '-alt-narrow']) or ((style == "short" or style == "narrow") and tbl[index .. '-alt-short']) or tbl[index]
 end;
 
@@ -65,9 +68,9 @@ local function parselangugage(displaynames, pattern, code, style, fallback)
 	end;
 	local pattern1;
 	for _, v in ipairs {
-			negotiate_table(displaynames.scripts, script, style) or script or false,
-			displaynames.territories[region] or region or false,
-			displaynames.variants[variant] or variant or false } do
+			negotiate_table(displaynames.scripts, script, style) or (fallback and script) or false,
+			negotiate_table(displaynames.territories, region, style) or (fallback and region) or false,
+			negotiate_table(displaynames.variants, variant, style) or (fallback and variant) or false } do
 		if v then
 			if pattern1 then
 				pattern1 = pattern.localeSeparator:gsub('{0}', pattern1):gsub('{1}', v);
