@@ -83,7 +83,7 @@ for k, v in next, _coredata.likelySubtags do
 	end;
 end;
 
-function d.rawminimize(locale)
+function d.rawminimize(locale, exclude_und)
 	local language, script, region, variant = d.getlocaleparts(locale);
 	local ret0, ret1, ret2, ret3, ret4;
 	local language_script = script and (language .. '-' .. script);
@@ -115,13 +115,13 @@ function d.rawminimize(locale)
 		end;
 	end;
 	local ret_language, ret_script, ret_region = d.getlocaleparts(ret0 or ret1 or ret2 or ret3 or ret4 or language);
-	if (ret_language == "und") then
+	if ((not exclude_und) and ret_language == "und") then
 		ret_language = language;
 	end;
-	if ((not ret_script) or ret_script == "Zzzz") and (not (ret0 or ret2)) then
+	if ((not ret_script) or ((not exclude_und) and ret_script == "Zzzz")) and (not (ret0 or ret2 or ret4)) then
 		ret_script = script;
 	end;
-	if ((not ret_region) or ret_region == "ZZ") and (not (ret0 or ret1)) then
+	if ((not ret_region) or ((not exclude_und) and ret_region == "ZZ")) and (not (ret0 or ret1 or ret3)) then
 		ret_region = region;
 	end;
 	if ret_language == 'en' and (not ret_region) and variant == "POSIX" then
@@ -129,8 +129,8 @@ function d.rawminimize(locale)
 	end;
 	return ret_language, ret_script, ret_region, variant;
 end;
-function d.minimizestr(locale)
-	local ret_language, ret_script, ret_region, variant = d.rawminimize(locale);
+function d.minimizestr(locale, exclude_und)
+	local ret_language, ret_script, ret_region, variant = d.rawminimize(locale, exclude_und);
 	return (ret_language)
 		.. ((ret_script and ('-' .. ret_script)) or '')
 		.. ((ret_region and ('-' .. ret_region)) or '')
@@ -199,7 +199,7 @@ function d.getdata(locale)
 	end;
 	locale = d.getlocalename(locale);
 	
-	local minimized, maximized = d.minimizestr(locale), d.maximizestr(locale);
+	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
 	if _cache[locale] == nil then
 		local ms = requireifnotnil(_data:FindFirstChild(minimized)) or requireifnotnil(_data:FindFirstChild(maximized));
 		if ms then
