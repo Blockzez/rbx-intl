@@ -44,7 +44,7 @@ local function getoperand(value)
 	local n, i, v, w, f, t;
 	n = value:gsub('-', ''):gsub('%.$', '');
 	i = n:gsub('%.%d*', '');
-	if n:match('%.') then
+	if n:find('%.') then
 		local frac_t = value:gsub('%d*%.', '');
 		local frac_nt = frac_t:gsub('0+$', '');
 		v = #frac_t;
@@ -143,8 +143,14 @@ local function pselect(self, ...)
 		value = tostring(value);
 		value = checker.parse_exp(value) or value;
 	end;
-	if not value:match("^%d*%.?%d*$") then
+	value = value:match("^[%+%-]?(%d*%.?%d*)$");
+	if not value then
 		return 'other';
+	end;
+	if self.isSignificant then
+		value = checker.raw_format_sig(value, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+	else
+		value = checker.raw_format(value, self.minimumIntegerDigits, self.maximumIntegerDigits, self.minimumFractionDigits, self.maximumFractionDigits, self.rounding);
 	end;
 	if _CACHE[self.type][self.locale] ~= nil then
 		return pr_select(_CACHE[self.type][self.locale], value);
@@ -185,6 +191,36 @@ function methods:ResolvedOptions()
 		ret.maximumFractionDigits = self.maximumFractionDigits;
 	end;
 	ret.midpointRounding = self.midpointRounding;
+	return ret;
+end;
+function methods:All()
+	local ret = { 'other' };
+	local data = _CACHE[self.type][self.locale];
+	if data == nil then
+		data = localedata.coredata['plurals-type-' .. self.type];
+		local pos = localedata.minimizestr(self.locale.baseName);
+		while (data[pos] == nil) and pos do
+			pos = localedata.negotiateparent(pos);
+		end;
+		data = data[pos];
+	end;
+	if data then
+		if data.many then
+			table.insert(ret, 1, 'many');
+		end;
+		if data.few then
+			table.insert(ret, 1, 'few');
+		end;
+		if data.two then
+			table.insert(ret, 1, 'two');
+		end;
+		if data.one then
+			table.insert(ret, 1, 'one');
+		end;
+		if data.zero then
+			table.insert(ret, 1, 'zero');
+		end;
+	end;
 	return ret;
 end;
 
