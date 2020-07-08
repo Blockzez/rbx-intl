@@ -10,6 +10,10 @@ local function title_case(str)
 	return str:gsub("^(.)(.*)$", title_case_gsub);
 end;
 
+local aliases = _coredata.metadata.alias;
+function d.getalias(key, val)
+	return aliases[key][val] and aliases[key][val]._replacement:match("^%S+") or val;
+end;
 function d.getlocalename(locale)
 	if type(locale) == "string" then
 		return (locale:gsub('%-u%-.+', ''));
@@ -17,7 +21,7 @@ function d.getlocalename(locale)
 	return (locale.language)
 		.. (locale.script and ('-' .. locale.script) or '')
 		.. (locale.region and ('-' .. locale.region) or '')
-		.. (locale.variant and ('-' .. locale.variant) or '');
+		.. (locale.variant and ('-' .. locale.variant:upper()) or '');
 end;
 function d.getlocaleparts(locale)
 	if type(locale) == "string" then
@@ -26,12 +30,12 @@ function d.getlocaleparts(locale)
 		if not (parts[1] and (parts[1]:match("^%a%a%a?%a?%a?%a?%a?%a?$") and #parts[1] ~= 4) or parts[1] == "root") then
 			return nil;
 		end;
-		local language = table.remove(parts, 1):lower();
+		local language = d.getalias('languageAlias', table.remove(parts, 1):lower());
 		if parts[1] and parts[1]:match('^%a%a%a%a$') then
-			script = title_case(table.remove(parts, 1));
+			script = d.getalias('scriptAlias', title_case(table.remove(parts, 1)));
 		end;
 		if parts[1] and (parts[1]:match("^%a%a$") or parts[1]:match("^%d%d%d$")) then
-			region = table.remove(parts, 1):upper();
+			region = d.getalias('territoryAlias', table.remove(parts, 1):upper());
 		end;
 		if parts[1] and (parts[1]:match("^%d%w%w%w$") or parts[1]:match("^%w%w%w%w%w%w?%w?%w?$")) then
 			variant = table.remove(parts, 1):upper();
@@ -41,7 +45,7 @@ function d.getlocaleparts(locale)
 		end;
 		return language, script, region, variant;
 	end;
-	return locale.language, locale.script, locale.region, locale.variant;
+	return locale.language, locale.script, locale.region, locale.variant and locale.variant:upper();
 end;
 function d.rawmaximize(locale, exclude_und)
 	local language, script, region, variant = d.getlocaleparts(locale);
