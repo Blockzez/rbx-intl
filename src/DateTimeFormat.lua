@@ -2,15 +2,12 @@ local localedata = require(script.Parent:WaitForChild("_localedata"));
 local checker = require(script.Parent:WaitForChild("_checker"));
 local intl_proxy = setmetatable({ }, checker.weaktable);
 local dtf = { };
-dtf._private =
-{
-	intl_proxy = intl_proxy,
-};
+
 --[=[
 	Since it's already tokenized, here's the token:
 	{symbol, count, serial}
 ]=]--
--- I've resued some code from the previous version of International
+-- I've reused some code from the previous version of International
 
 -- Algorithmn: Gregorian
 local months_to_days = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365 };
@@ -83,21 +80,15 @@ local function geterayearmonthdayhirji(days)
 	-- 19 July 622 A.D.
 	days = days - 227014;
 	
-	local cycle_number, day_of_cycle = (days < 0 and math.ceil or math.floor)(days / 10631), math.fmod(days, 10631);
-	local year_in_cycle = 30 * math.sign(day_of_cycle);
-	for i, v in ipairs(year_cycles_hiriji) do
-		if math.abs(day_of_cycle) < v then
-			year_in_cycle = i - 1;
-			break;
-		end;
+	local cycle_number, day_of_cycle = math.floor(days / 10631), days % 10631;
+	local year_in_cycle = math.floor(day_of_cycle / 356) + 1;
+	if day_of_cycle >= (year_cycles_hiriji[year_in_cycle + 1] or math.huge) then
+		year_in_cycle = year_in_cycle + 1;
 	end;
 	local day_of_year = day_of_cycle - year_cycles_hiriji[year_in_cycle];
-	local month = 12;
-	for i, v in ipairs(days_in_months_hiriji) do
-		if math.abs(day_of_year) < v then
-			month = i - 1;
-			break;
-		end;
+	local month = math.floor(day_of_year / 31) + 1;
+	if day_of_year >= (days_in_months_hiriji[month + 1] or math.huge) then
+		month = month + 1;
 	end;
 	if day_of_year < 0 then
 		day_of_year = (is_leap_hirji((cycle_number * 30) + year_in_cycle) and 355 or 354);
@@ -123,7 +114,6 @@ local function geterayearmonthday(cal, year, month, day)
 		end;
 	end;
 end;
-
 
 local function zero_pad_substitute(value, length, nu)
 	-- Just a sugar syntax
@@ -334,20 +324,20 @@ local function find_format(self, range)
 		for i, v in ipairs { self.weekday or false, self.hour or false, self.minute or false, self.second or false } do
 			if v then
 				local retchar;
-				if i == 1 and date_flexible_find:find('E') then
-					continue;
-				elseif i == 2 then
-					if self.hourCycle ~= nil then
-						retchar = hourcycle_alias[self.hourCycle];
-					elseif self.hour12 ~= nil then
-						retchar = self.hour12 and 'h' or 'H';
+				if i ~= 1 or (not date_flexible_find:find('E')) then
+					if i == 2 then
+						if self.hourCycle ~= nil then
+							retchar = hourcycle_alias[self.hourCycle];
+						elseif self.hour12 ~= nil then
+							retchar = self.hour12 and 'h' or 'H';
+						else
+							retchar = hourcycle_alias[self.currentHourCycle] or self.currentHourCycle or 'H';
+						end;
 					else
-						retchar = hourcycle_alias[self.currentHourCycle] or self.currentHourCycle or 'H';
+						retchar = char_pattern_flexible_find[2][i]:rep(flexible_find_size[v]);
 					end;
-				else
-					retchar = char_pattern_flexible_find[2][i]:rep(flexible_find_size[v]);
+					time_flexible_find = time_flexible_find .. retchar;
 				end;
-				time_flexible_find = time_flexible_find .. retchar;
 			end;
 		end;
 	end;
@@ -358,7 +348,6 @@ local function find_format(self, range)
 	local result_format;
 	
 	if not (result_date_format or result_time_format) then
-		local date_format = data.dateFormats[self.dateStyle or 'medium'];
 		if self.timeStyle then
 			local time_format = data.timeFormats[self.timeStyle];
 			
@@ -369,12 +358,12 @@ local function find_format(self, range)
 			end;
 			
 			if self.dateStyle then
-				result_format = checker.insertformat(data.dateTimeFormats[self.timeStyle or self.dateStyle or 'medium'], time_format, date_format);
+				result_format = checker.insertformat(data.dateTimeFormats[self.timeStyle or self.dateStyle or 'medium'], time_format, data.dateFormats[self.dateStyle or 'medium']);
 			else
 				result_format = time_format;
 			end;
 		else
-			result_format = date_format;
+			result_format = data.dateFormats[self.dateStyle or 'medium'];
 		end;
 	elseif not result_date_format then
 		if self.dateStyle then
@@ -450,12 +439,16 @@ local function format(self, parts, date0, date1)
 		date0 = os.date('!*t', date0);
 	elseif date0 == nil then
 		date0 = os.date('!*t');
-	elseif typeof(date0) ~= "userdata" and type(date0) ~= "table" then
+	elseif typeof(date0) == "DateTime" then
+		date0 = date0:ToUniversalTime();
+	elseif (typeof(date0) ~= "userdata" or getmetatable(date0) == nil) and type(date0) ~= "table" then
 		error("invalid argument #2 (date expected, got " .. typeof(date0) .. ')', 4);
 	end;
 	if type(date1) == "number" then
 		date1 = os.date('!*t', date1);
-	elseif date1 ~= nil and typeof(date1) ~= "userdata" and type(date1) ~= "table" then
+	elseif typeof(date1) == "DateTime" then
+		date1 = date1:ToUniversalTime();
+	elseif date1 ~= nil and (typeof(date1) ~= "userdata" or getmetatable(date0) == nil) and type(date1) ~= "table" then
 		error("invalid argument #2 (date expected, got " .. typeof(date1) .. ')', 4);
 	end;
 	
@@ -532,14 +525,18 @@ local function format(self, parts, date0, date1)
 	
 	if fallback and not parts then
 		return (self.rangeFallbackPattern
-			:gsub('{0}', format_pattern(self, parts and checker.initializepart() or '', pattern, parts, info0, true, 0))
-			:gsub('{1}', format_pattern(self, parts and checker.initializepart() or '', pattern, parts, true, info1, 2)));
+			:gsub('{0}', table.concat(format_pattern(self, checker.initializestringbuilder{}, pattern, parts, info0, true, 0)))
+			:gsub('{1}', table.concat(format_pattern(self, checker.initializestringbuilder{}, pattern, parts, true, info1, 2))));
 	elseif fallback then
 		return checker.formattoparts(nil, checker.initializepart(), self.rangeFallbackPattern, 'shared',
-			format_pattern(self, parts and checker.initializepart() or '', pattern, parts, info0, true, 0),
-			format_pattern(self, parts and checker.initializepart() or '', pattern, parts, true, info1, 2));
+			format_pattern(self, checker.initializepart(), pattern, parts, info0, true, 0),
+			format_pattern(self, checker.initializepart(), pattern, parts, true, info1, 2));
 	end;
-	return format_pattern(self, parts and checker.initializepart() or '', pattern, parts, info0, info1, nil);
+	local ret = format_pattern(self, parts and checker.initializepart() or checker.initializestringbuilder{}, pattern, parts, info0, info1, nil);
+	if parts then
+		return setmetatable(ret, nil);
+	end;
+	return table.concat(ret);
 end;
 
 local methods = checker.initalize_class_methods(intl_proxy);
@@ -622,4 +619,9 @@ function dtf.new(...)
 	return pointer;
 end;
 
+dtf._private = {
+	intl_proxy = intl_proxy,
+	format = format,
+	find_format = find_format,
+};
 return dtf;
