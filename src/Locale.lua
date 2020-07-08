@@ -48,16 +48,16 @@ local function title_case(str)
 end;
 local check = {
 	language = function(str)
-		return str and (str:match("^%a%a%a?%a?%a?%a?%a?%a?$") and #str ~= 4) and str:lower();
+		return str and (#str ~= 4 and str:match("^%a%a%a?%a?%a?%a?%a?%a?$")) and localedata.getalias('languageAlias', str:lower());
 	end,
-	script = function(str)
-		return str and str:match("^%a%a%a%a$") and title_case(str);
+	script = function(str, nomod)
+		return str and str:match("^%a%a%a%a$") and (nomod and str or localedata.getalias('scriptAlias', title_case(str)));
 	end,
-	region = function(str)
-		return str and (str:match("^%a%a$") or str:match("^%d%d%d$")) and str:upper();
+	region = function(str, nomod)
+		return str and (str:match("^%a%a$") or str:match("^%d%d%d$")) and (nomod and str or localedata.getalias('territoryAlias', str:upper()));
 	end,
-	variant = function(str)
-		return str and (str:match("^%d%w%w%w$") or str:match("^%w%w%w%w%w%w?%w?%w?$")) and str:upper();
+	variant = function(str, nomod)
+		return str and (str:match("^%d%w%w%w$") or str:match("^%w%w%w%w%w%w?%w?%w?$")) and (nomod and str or str:lower());
 	end,
 	u = function(str)
 		return str and str:match("^%w%w%w?%w?%w?%w?%w?%w?$") and str:lower();
@@ -110,27 +110,25 @@ local function parse_identifier(identifier)
 	
 	-- The language must have exactly 2 - 3 or 5 - 8 latin characters
 	ret.language = check.language(table.remove(parts, 1));
-	if ret.language then
-		ret.language = ret.language:lower();
-	else
+	if not ret.language then
 		return nil;
 	end;
 	
 	-- The script must have exactly 4 latin characters
-	if check.script(parts[1]) then
-		ret.script = title_case(table.remove(parts, 1));
+	if check.script(parts[1], true) then
+		ret.script = localedata.getalias('scriptAlias', title_case(table.remove(parts, 1)));
 	end;
 	
 	-- The region must only contain latin alphabets and must contain exactly 2 characters
 	-- OR it must only contain western arabic numbers and must contain exactly 3 characters
-	if check.region(parts[1]) then
-		ret.region = table.remove(parts, 1):upper();
+	if check.region(parts[1], true) then
+		ret.region = localedata.getalias('territoryAlias', table.remove(parts, 1):upper());
 	end;
 	
 	-- The variant must only contain latin alphabets and must contain exactly 5-8 characters
 	-- OR it must begin with a digit and must only contain alphanumeric characters and must contain exactly 4 character
-	if check.variant(parts[1]) then
-		ret.variant = table.remove(parts, 1):upper();
+	if check.variant(parts[1], true) then
+		ret.variant = table.remove(parts, 1):lower();
 	end;
 	
 	-- An extra/invalid part
@@ -148,10 +146,10 @@ local function parse_identifier(identifier)
 		end;
 		
 		for i = 1, #uparts, 2 do
-			uparts[i], uparts[i + 1] = check.u(uparts[i]), check.u(uparts[i + 1]);
+			uparts[i], uparts[i + 1] = check.u(uparts[i]), check.u_item(uparts[i + 1]);
 			if not (uparts[i] and uparts[i + 1]) then
 				return nil;
-			elseif u_alias[uparts[i]] then
+			elseif u_alias[uparts[i]] and not ret[u_alias[uparts[i]]] then
 				ret[u_alias[uparts[i]]] = uparts[i + 1];
 			end;
 		end;
@@ -226,14 +224,14 @@ local function tostr(self)
 	self = intl_proxy[self];
 	local u_ext;
 	for _, v in next, u_extension_order do
-		if self[v[2]] then
+		if (v[2] ~= "variant" or self.variant == "posix") and self[v[2]] then
 			u_ext = (u_ext or '-u') .. '-' .. v[1] .. '-' .. self[v[2]];
 		end;
 	end;
 	return (self.language)
 		.. (self.script and ('-' .. self.script) or '')
 		.. (self.region and ('-' .. self.region) or '')
-		.. (self.variant and ('-' .. self.variant) or '')
+		.. (self.variant and self.variant ~= "posix" and ('-' .. self.variant) or '')
 		.. (u_ext or '');
 end;
 
@@ -272,8 +270,11 @@ function l.new(...)
 			error("Incorrect locale information provided", 2);
 		end;
 		if options then
+			if type(options) ~= "table" then
+				error("Incorrect locale information provided", 2);
+			end;
 			for key, value in next, options do
-				value = ((key ~= 'x' and check[key]) or check.u)(value);
+				value = ((key ~= 'x' and check[key]) or check.u_item)(value);
 				if not value then
 					error("Incorrect locale information provided", 2);
 				end;
@@ -285,10 +286,21 @@ function l.new(...)
 		data.baseName = (data.language)
 			.. (data.script and ('-' .. data.script) or '')
 			.. (data.region and ('-' .. data.region) or '')
-			.. (data.variant and ((data.variant == 'POSIX' and '-u-va-' or '-') .. data.variant:lower()) or '');
+			.. (data.variant and (data.variant == "posix" and '-u-va-posix' or ('-' .. data.variant)) or '');
 	elseif intl_proxy[value] then
 		-- Locale data, since this is immutible it doesn't matter whether it's passed by referenece or not
 		data = intl_proxy[value];
+	elseif type(value) == "userdata" and type(getmetatable(value)) == "table" then
+		local locale_mt = getmetatable(value).__locale;
+		if locale_mt ~= nil then
+			local result, options = locale_mt(value, options);
+			if type(result) == "string" then
+				return l.new(result, options);
+			elseif intl_proxy[result] then
+				return result;
+			end;
+		end;
+		error("Incorrect locale information provided", 2);
 	else
 		-- As no valid Unicode BCP 47 locale contain only numbers
 		-- There's no point converting it to string
@@ -329,12 +341,12 @@ LocalizationSvc:GetPropertyChangedSignal("SystemLocaleId"):Connect(update_system
 local runtimeLocale;
 function l.SetLocale(locale)
 	if locale ~= nil and (not intl_proxy[locale]) then
-		locale = locale.new(locale);
+		locale = l.new(locale);
 	end;
 	runtimeLocale = locale;
 end;
 function l.GetLocale(locale)
-	return runtimeLocale or l.RobloxLocale or l.SystemLocale or l.new('und-Zzzz-ZZ');
+	return runtimeLocale or (l.RobloxLocale.baseName ~= "und-Zzzz-ZZ" and l.RobloxLocale) or l.SystemLocale;
 end;
 
 return l;
