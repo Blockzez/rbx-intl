@@ -1,5 +1,5 @@
 --[=[
-	Version 2.1.1
+	Version 2.2.0
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -106,6 +106,7 @@ local function isbigint(v)
 	local str = tostring(v);
 	return str:match("^[nN][aA][nN]$")
 		or str:match("^-?[iI][nN][fF]$") or str:match("^-?[iI][nN][fF][iI][nN][iI][tT][yY]$")
+		or (str:find('[eE]') and str:match("^%d*%.?%d*[eE][-+]?%d+$"))
 		or str:match("^-?%d+%.?%d*$"),
 		str;
 end;
@@ -135,16 +136,26 @@ function modules.toLocaleString(...)
 		error("missing argument #1", 2);
 	end;
 	local value, locale, options = ...;
-	if type(getmetatable(value)) == "table" and getmetatable(value).__tolocalestring ~= nil then
-		return getmetatable(value).__tolocalestring(value, checker.negotiatelocale(locale), options);
+	if type(getmetatable(value)) == "table" then
+		local tolocalestring_method = getmetatable(value).__tolocalestring;
+		if tolocalestring_method ~= nil then
+			return tolocalestring_method(value, checker.negotiatelocale(locale), options);
+		end;
 	end;
 	
 	local type;
 	type, value = gettype(value);
 	if type == 'number' then
-		return modules.NumberFormat.new(locale, options):Format(value);
+		local option = checker.options('nu', locale, options);
+		option.pluralRule = modules.PluralRules.new(option.locale, { type = "cardinal" });
+		return private.NumberFormat.format(option, false, value);
 	elseif type == 'date' then
-		return modules.DateTimeFormat.new(locale, options):Format(value);
+		local option = checker.options('dt/datetime', locale, options);
+		option.format = private.DateTimeFormat.find_format(option, false);
+		option.formatRange, option.rangeFallback = private.DateTimeFormat.find_format(option, true);
+		option.rangeFallbackPattern = option.data.dateTimeFormats.intervalFormats.intervalFormatFallback;
+		option.rangeFallbackPatternToken = checker.tokenizeformat(option.rangeFallbackPattern);
+		return private.DateTimeFormat.format(options, false, value);
 	elseif type == 'Locale' then
 		return modules.DisplayNames.new(locale, options):Format(value);
 	elseif type == 'list' then
@@ -153,6 +164,48 @@ function modules.toLocaleString(...)
 		return '';
 	end;
 	return tostring(value);
+end;
+
+function modules.toLocaleDateString(...)
+	if select('#', ...) == 0 then
+		error("missing argument #1", 2);
+	end;
+	
+	local value, locale, options = ...;
+	if type(value) == "userdata" and type(getmetatable(value)) == "table" then
+		local tolocaledatestring_method = getmetatable(value).__tolocaledatestring;
+		if tolocaledatestring_method ~= nil then
+			return tolocaledatestring_method(value, checker.negotiatelocale(locale), options);
+		end;
+	end;
+	
+	local option = checker.options('dt/date', locale, options);
+	option.format = private.DateTimeFormat.find_format(option, false);
+	option.formatRange, option.rangeFallback = private.DateTimeFormat.find_format(option, true);
+	option.rangeFallbackPattern = option.data.dateTimeFormats.intervalFormats.intervalFormatFallback;
+	option.rangeFallbackPatternToken = checker.tokenizeformat(option.rangeFallbackPattern);
+	return private.DateTimeFormat.format(option, false, value);
+end;
+
+function modules.toLocaleTimeString(...)
+	if select('#', ...) == 0 then
+		error("missing argument #1", 2);
+	end;
+	
+	local value, locale, options = ...;
+	if type(value) == "userdata" and type(getmetatable(value)) == "table" then
+		local tolocaletimestring_method = getmetatable(value).__tolocaletimestring;
+		if tolocaletimestring_method ~= nil then
+			return tolocaletimestring_method(value, checker.negotiatelocale(locale), options);
+		end;
+	end;
+	
+	local option = checker.options('dt/time', select(2, ...));
+	option.format = private.DateTimeFormat.find_format(option, false);
+	option.formatRange, option.rangeFallback = private.DateTimeFormat.find_format(option, true);
+	option.rangeFallbackPattern = option.data.dateTimeFormats.intervalFormats.intervalFormatFallback;
+	option.rangeFallbackPatternToken = checker.tokenizeformat(option.rangeFallbackPattern);
+	return private.DateTimeFormat.format(option, false, (...));
 end;
 
 function modules.getCanonicalLocales(...)
