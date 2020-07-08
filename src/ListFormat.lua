@@ -6,7 +6,7 @@ lf._private =
 	intl_proxy = intl_proxy,
 };
 
-local function format_to_parts(self, value, contains)
+local function format_to_parts(self, value)
 	local ret, pret = nil, checker.checker.initializepart();
 	for _, v in ipairs((#value == 2) and self.t or self.s) do
 		if v == 0 then
@@ -38,7 +38,7 @@ local function format_to_parts(self, value, contains)
 	return setmetatable(ret, nil);
 end;
 
-local function format(self, value, contains)
+local function format(self, value)
 	local len = #value;
 	if type(value[1]) ~= "string" then
 		error("yielded " .. tostring(value[1]) .. " which is not a string", 4);
@@ -63,7 +63,7 @@ local function format(self, value, contains)
 		end;
 		ret = ret:gsub('{1}', self.pattern['middle']:gsub('{0}', value[i], self.locale, self.options));
 	end;
-	return (ret:gsub('{1}', self.pattern['end']:gsub('{0}', value[len - 1]):gsub('{1}', value[len])));
+	return ret:gsub('{1}', self.pattern['end']:gsub('{0}', value[len - 1]):gsub('{1}', value[len]));
 end;
 
 
@@ -71,16 +71,16 @@ local methods = checker.initalize_class_methods(intl_proxy);
 function methods:Format(...)
 	local len = select('#', ...);
 	if len < 1 then
-		error(len == 1 and "missing argument #1 (table expected)", 3);
+		error("missing argument #1 (table expected)", 3);
 	end;
-	return format(self, (...), { });
+	return (format(self, (...), { }));
 end;
 function methods:FormatToParts(...)
 	local len = select('#', ...);
 	if len < 1 then
-		error(len == 1 and "missing argument #1 (table expected)", 3);
+		error("missing argument #1 (table expected)", 3);
 	end;
-	return format_to_parts(self, (...), { });
+	return (format_to_parts(self, (...), { }));
 end;
 function methods:ResolvedOptions()
 	local ret = { };
