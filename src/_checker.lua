@@ -2,8 +2,6 @@ local Locale = require(script.Parent:WaitForChild("Locale"));
 local localedata = require(script.Parent:WaitForChild("_localedata"));
 local c = { };
 
-c.emptyreference = { };
-
 c.lockmsg = "The metatable is locked";
 
 function c.initalize_class_methods(proxy)
@@ -61,7 +59,7 @@ local valid_value_property =
 	["nu/signDisplay"] = { "auto", "never", "always", "exceptZero" },
 	["nu/style"] = { "decimal", "currency", "percent", "unit" },
 	["nu/unitDisplay"] = "%display1",
-	["nu/useGrouping"] = { "min2", "auto", "always", "never", true, false },
+	["nu/useGrouping"] = { "min2", "auto", "always", "never" },
 	["nu/minimumIntegerDigits"] = "f/1..",
 	["nu/maximumIntegerDigits"] = "f/minimumIntegerDigits..",
 	["nu/minimumFractionDigits"] = "f/0..",
@@ -112,7 +110,7 @@ local function check_property(tbl_out, tbl_to_check, property, default)
 		valid = true;
 	elseif check_values:match('^lp/') then
 		valid = (type(value) == "string") and (value:match(check_values:match("lp/(.+)")));
-	elseif type(value) == "number" and (value == value) and (value % 1 == 0) then
+	elseif type(value) == "number" and (value % 1 == 0) or (value == math.huge) then
 		local min, max = check_values:match("f/(%w*)%.%.(%w*)");
 		valid = (value >= (tbl_out[min] or tonumber(min) or 0)) and (max == '' or (value <= tonumber(max)));
 	end;
@@ -137,13 +135,14 @@ function c.negotiatelocale(locales)
 	local data;
 	if type(locales) == "table" then
 		locales = table.move(locales, 1, #locales, 1, table.create(#locales));
+		table.insert(locales, Locale.GetLocale());
 		table.insert(locales, Locale.RobloxLocale);
 		table.insert(locales, Locale.SystemLocale);
 		table.insert(locales, 'en-Latn-US');
 	elseif (type(locales) == "string" or Locale._private.intl_proxy[locales]) then
-		locales = { locales, Locale.RobloxLocale, Locale.SystemLocale, 'en-Latn-US' };
+		locales = { locales, Locale.GetLocale(), Locale.RobloxLocale, Locale.SystemLocale, 'en-Latn-US' };
 	elseif locales == nil then
-		locales = { Locale.RobloxLocale, Locale.SystemLocale, 'en-Latn-US' };
+		locales = { Locale.GetLocale(), Locale.RobloxLocale, Locale.SystemLocale, 'en-Latn-US' };
 	else
 		error("Incorrect locale information provided", 3);
 	end;
@@ -168,7 +167,7 @@ local calendar_alias = { gregory = "gregorian", japanese = "japanese", buddhist 
 function c.options(ttype, locales, options)
 	local ret = { };
 	if type(options) ~= "table" then
-		options = c.emptyreference;
+		options = { };
 	end;
 	local locale, data = c.negotiatelocale(locales);
 	ret.locale = locale;
@@ -185,9 +184,6 @@ function c.options(ttype, locales, options)
 			check_property(ret.numberOptions, options, 'nu/notation', 'standard');
 			
 			check_property(ret.numberOptions, options, 'nu/useGrouping', (ret.notation == "compact") and "min2" or "auto");
-			if type(ret.useGrouping) == "boolean" then
-				ret.useGrouping = ret.useGrouping and 'always' or 'never';
-			end;
 			if ret.numberOptions == ret then
 				ret.numberOptions = nil;
 			end;
@@ -264,6 +260,7 @@ function c.options(ttype, locales, options)
 				ret.compactPattern = decimalPattern[ret.compactDisplay].decimalFormat;
 			end;
 		end;
+		ret.rangePattern = c.negotiate_numbering_system_index('range', numbers, 'miscPatterns-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
 	elseif t == "pr" then
 		check_property(ret, options, 'pr/type', 'cardinal');
 	elseif t == "dt" then
@@ -296,10 +293,13 @@ function c.options(ttype, locales, options)
 			pos = localedata.negotiateparent(pos);
 		end;
 		ret.dayPeriodRule = rule;
-		if v == "time" and not (ret.era or ret.year or ret.month or ret.day or ret.weekday or ret.dateStyle) then
+		if v == "date" and not (ret.era or ret.year or ret.month or ret.day or ret.weekday or ret.dateStyle) then
 			ret.dateStyle = 'medium';
 		elseif v == "time" and not (ret.hour or ret.minute or ret.second or ret.timeStyle) then
 			ret.timeStyle = 'medium';
+		elseif v == "datetime" and not (ret.era or ret.year or ret.month or ret.day or ret.weekday or ret.dateStyle
+			or ret.hour or ret.minute or ret.second or ret.timeStyle) then
+			ret.dateStyle, ret.timeStyle = 'medium', 'medium';
 		end;
 	elseif t == "rt" then
 		check_property(ret, options, 'rt/numeric', 'always');
@@ -308,8 +308,6 @@ function c.options(ttype, locales, options)
 	elseif t == "lf" then
 		check_property(ret, options, 'lf/type', 'conjunction');
 		check_property(ret, options, 'lf/style', 'long');
-		ret.numberOptions = options.numberOptions;
-		ret.dateOptions = options.dateOptions;
 		local p = data.listPatterns["listPattern-type-" .. (ret.type:gsub('disjunction', 'or'):gsub('conjunction', 'standard'))
 			.. (ret.style == "long" and '' or ('-' .. ret.style))];
 		ret.pattern = p;
@@ -328,7 +326,7 @@ function c.options(ttype, locales, options)
 			check_property(ret, options, 'nu/maximumFractionDigits');
 			
 			if not (ret.minimumFractionDigits or ret.maximumFractionDigits) then
-				if (ret.currency and ret.notation ~= "compact") then
+				if (ret.style == "currency" and ret.notation ~= "compact") then
 					local currencyDataFractions = localedata.coredata.currencyData.fractions;
 					local digits = (currencyDataFractions[ret.currency] and currencyDataFractions[ret.currency]._digits) or 2;
 					ret.minimumFractionDigits = digits;
@@ -367,17 +365,33 @@ local part_mt =
 		return self;
 	end;
 };
+local string_builder_mt = {
+	__concat = function(self, other)
+		if type(self) == "string" then
+			table.insert(other, 1, self);
+			return other;
+		elseif getmetatable(self) == getmetatable(other) then
+			table.move(other, 1, #other, #self + 1, self);
+			return self;
+		end;
+		table.insert(self, other);
+		return self;
+	end,
+};
 function c.initializepart(t)
 	if getmetatable(t) == part_mt then
 		return t;
 	end;
 	return setmetatable(t and (t.type and { t } or t) or { }, part_mt);
 end;
-function c.addpart(self, ttype, value, source)
-	return (type(self) == "string" and self or c.initializepart(self)) .. (type(self) == "string" and value or { type = ttype, value = value, source = source });
+function c.initializestringbuilder(t)
+	return setmetatable(t, string_builder_mt);
 end;
-function c.addtofirstpart(ttype, value, self)
-	return (type(self) == "string" and value or { type = ttype, value = value }) .. (type(self) == "string" and self or c.initializepart(self));
+function c.addpart(self, ttype, value, source)
+	return ((getmetatable(self) == string_builder_mt or type(self) == "string") and self or c.initializepart(self)) .. ((getmetatable(self) == string_builder_mt or type(self) == "string") and value or { type = ttype, value = value, source = source });
+end;
+function c.addtofirstpart(ttype, value, source, self)
+	return ((getmetatable(self) == string_builder_mt or type(self) == "string") and value or { type = ttype, value = value, source = source }) .. ((getmetatable(self) == string_builder_mt or type(self) == "string") and self or c.initializepart(self));
 end;
 
 -- I have yet to find a locale that uses '{' or '}' for list
@@ -448,10 +462,10 @@ function c.formattoparts(type, start, value, source, ...)
 		if i1 then
 			if value:sub(i0, i1 - 1) ~= '' then
 				if type then
-					local prefix, value, suffix = c.spacestoparts(c.fixspace(value:sub(i0, i1 - 1)));
-					ret = c.addpart(ret, "literal", prefix);
-					ret = c.addpart(ret, type, value);
-					ret = c.addpart(ret, "literal", suffix);
+					local prefix, value, suffix = c.spacestoparts(value:sub(i0, i1 - 1));
+					ret = c.addpart(ret, "literal", prefix, source);
+					ret = c.addpart(ret, type, value, source);
+					ret = c.addpart(ret, "literal", suffix, source);
 				else
 					ret = ret .. { type = "literal", value = value:sub(i0, i1 - 1), source = source };
 				end;
@@ -461,10 +475,10 @@ function c.formattoparts(type, start, value, source, ...)
 		else
 			if value:sub(i0) ~= '' then
 				if type then
-					local prefix, value, suffix = c.spacestoparts(c.fixspace(value:sub(i0)));
-					ret = c.addpart(ret, "literal", prefix);
-					ret = c.addpart(ret, type, value);
-					ret = c.addpart(ret, "literal", suffix);
+					local prefix, value, suffix = c.spacestoparts(value:sub(i0));
+					ret = c.addpart(ret, "literal", prefix, source);
+					ret = c.addpart(ret, type, value, source);
+					ret = c.addpart(ret, "literal", suffix, source);
 				else
 					ret = ret .. { type = "literal", value = value:sub(i0), source = source };
 				end;
@@ -500,9 +514,20 @@ function c.spacestoparts(value)
 end;
 
 --
-
-function c.negotiate_plural_table(tbl, prefix, suffix, plural_rule, value)
-	return tbl[prefix .. value .. suffix] or tbl[prefix .. plural_rule:Select(value) .. suffix] or tbl[prefix .. 'other' .. suffix];
+function c.negotiate_plural_table(tbl, prefix, suffix, plural_rule, value0, value1)
+	local plural0, plural1 = plural_rule:Select(value0), value1 and plural_rule:Select(value1);
+	local plural;
+	if value1 then
+		local data = localedata.coredata['plurals-type-pluralRanges'];
+		local pos = localedata.minimizestr(plural_rule:ResolvedOptions().locale.baseName);
+		while (not data[pos]) and pos do
+			pos = localedata.negotiateparent(pos);
+		end;
+		plural = (data[pos] and data[pos][plural0] and data[pos][plural0][plural1]) or plural1
+	else
+		plural = value0;
+	end;
+	return (not value1 and tbl[prefix .. value0 .. suffix]) or tbl[prefix .. plural .. suffix] or tbl[prefix .. 'other' .. suffix];
 end;
 
 function c.negotiate_numbering_system(tbl, prefix, suffix, ...)
@@ -555,12 +580,10 @@ function c.substitute(str, nu)
 end;
 
 local function quantize(val, exp, rounding)
-	local negt, post = val:match("(-?)([%d.]*)");
-	post = '0' .. post;
-	local d, e = post:gsub('%.', ''), (post:find('%.') or (#post + 1));
+	local d, e = ('0' .. val):gsub('%.', ''), (val:find('%.') or (#val + 1)) + 1;
 	local pos = e + exp;
 	if pos > #d then
-		return negt .. post:sub(2);
+		return val:match("^(%d*)%.?(%d*)$");
 	end;
 	d = d:split('');
 	local add = rounding == 'ceiling';
@@ -579,8 +602,7 @@ local function quantize(val, exp, rounding)
 			d[pos] = tonumber(d[pos]) + 1;
 		until d[pos] ~= 10;
 	end;
-	local int, dec, frac = (table.concat(d, '', 1, e - 1) .. '.' .. table.concat(d, '', e)):match("(%d*)([.]?)(%d*)");
-	return negt .. (int:gsub('^0+', '') .. dec .. frac:gsub('0+$', '')):gsub('[.]$', '');
+	return table.concat(d, '', 1, e - 1), table.concat(d, '', e);
 end;
 local function scale(val, exp)
 	val = ('0'):rep(-exp) .. val .. ('0'):rep(exp);
@@ -590,7 +612,12 @@ local function scale(val, exp)
 	return unscaled:sub(1, dpos - 1) .. '.' .. unscaled:sub(dpos);
 end;
 function c.raw_format(val, minintg, maxintg, minfrac, maxfrac, rounding)
-	local intg, frac = ((maxfrac and maxfrac ~= math.huge and quantize(val, maxfrac, rounding)) or val):match("(%d*)%.?(%d*)");
+	local intg, frac;
+	if maxfrac and maxfrac ~= math.huge then
+		intg, frac = quantize(val, maxfrac, rounding);
+	else
+		intg, frac = val:match("^(%d*)%.?(%d*)$");
+	end;
 	intg = intg:gsub('^0+', '');
 	frac = frac:gsub('0+$', '');
 	local intglen = #intg;
@@ -604,13 +631,18 @@ function c.raw_format(val, minintg, maxintg, minfrac, maxfrac, rounding)
 	if maxintg and (intglen > maxintg) then
 		intg = intg:sub(-maxintg);
 	end;
+	if frac == '' then
+		return intg;
+	end;
 	return intg .. '.' .. frac;
 end;
 function c.raw_format_sig(val, min, max, rounding)
+	local intg, frac;
 	if max and max ~= math.huge then
-		val = quantize(val, max - ((val:find('%.') or (#val + 1)) - 1), rounding);
+		intg, frac = quantize(val, max - ((val:find('%.') or (#val + 1)) - 1), rounding);
+	else
+		intg, frac = val:match("^(%d*)%.?(%d*)$");
 	end;
-	local intg, frac = val:match("(%d*)%.?(%d*)");
 	intg = intg:gsub('^0+', '');
 	frac = frac:gsub('0+$', '');
 	if min then
@@ -619,13 +651,16 @@ function c.raw_format_sig(val, min, max, rounding)
 			frac = frac .. ('0'):rep(min - #frac);
 		end;
 	end;
+	if frac == '' then
+		return intg;
+	end;
 	return intg .. '.' .. frac;
 end;
 function c.parse_exp(val)
 	if not val:find('[eE]') then
 		return val;
 	end;
-	local val, exp = val:match('^(%d*%.?%d*)[eE]([-+]?%d+)$');
+	local negt, val, exp = val:match('^([+%-]?)(%d*%.?%d*)[eE]([+%-]?%d+)$');
 	if val then
 		exp = tonumber(exp);
 		if not exp then
@@ -634,9 +669,22 @@ function c.parse_exp(val)
 		if val == '' then
 			return nil;
 		end;
-		val = scale(val, exp);
+		return negt .. scale(val, exp);
 	end;
-	return val;
+	return nil;
+end;
+function c.num_to_str(value, scale_v)
+	local value_type = typeof(value);
+	if value_type == "number" then
+		value = (('%.17f'):format(value));
+	else
+		value = tostring(value);
+		value = c.parse_exp(value) or value:lower();
+	end;
+	if scale_v then
+		value = scale(value, scale_v);
+	end;
+	return value;
 end;
 
 return c;
