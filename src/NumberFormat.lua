@@ -24,26 +24,21 @@ local nf = { };
 ]=]--
 
 --[=[ Functions, can't rely on double just in case a BigInt was inputted ]=]--
-local function scale(val, exp)
-	val = ('0'):rep(-exp) .. val .. ('0'):rep(exp);
-	local unscaled = (val:gsub("[.,]", ''));
-	local len = #val;
-	local dpos = (val:find("[.,]") or (len + 1)) + exp;
-	return unscaled:sub(1, dpos - 1) .. '.' .. unscaled:sub(dpos);
-end;
 local function compact(val, size)
 	val = (val:gsub('%.', ''));
 	return val:sub(1, size) .. '.' .. val:sub(size + 1);
 end;
-local function exp(val)
+local function exp(val, engineering)
 	local negt, intg, frac = val:match('(-?)(%d*)%.?(%d*)');
 	intg = intg:gsub('^0+', '');
 	if #intg == 0 then
-		local fsize = #frac:gsub('[^0]*$', '');
-		return negt .. (frac:sub(fsize + 1, fsize + 1) == '' and '0' or frac:sub(fsize + 1, fsize + 1)) 
-			.. ('.' .. frac:sub(fsize + 2)):gsub('%.0*$', '') .. ('E-' .. fsize + 1):gsub('-0+$', '0');
+		local fsize = (frac:find('[^0]') or (#frac + 1)) - 1;
+		local size = engineering and (3 - (fsize % 3)) or 1;
+		return negt .. (frac:sub(fsize + 1, fsize + size) .. ('0'):rep(math.max((fsize + size) - #frac, 0))) 
+			.. ('.' .. frac:sub(fsize + size + 1)):gsub('%.0*$', '') .. ('E-' .. fsize + size):gsub('-0+$', '0');
 	end;
-	return negt .. (intg:sub(1, 1) == '' and '0' or intg:sub(1, 1)) .. ('.' .. intg:sub(2) .. frac):gsub('%.0*$', '') .. 'E' .. (#intg - 1);
+	local size = engineering and (((#intg - 1) % 3) + 1) or 1;
+	return negt .. (('0'):rep(math.max(size - #intg, 0)) .. intg:sub(1, size)) .. ('.' .. intg:sub(size + 1) .. frac):gsub('%.0*$', '') .. 'E' .. (#intg - size);
 end;
 
 local function format_pattern(self, start, value, pattern, negt, compact, source)
@@ -94,8 +89,8 @@ end;
 
 --[=[ Formatter ]=]--
 function format(self, parts, value0, value1)
-	value0 = checker.num_to_str(value0);
-	value1 = value1 and checker.num_to_str(value1);
+	value0 = checker.num_to_str(value0, self.style == "percent" and 2);
+	value1 = value1 and checker.num_to_str(value1, self.style == "percent" and 2);
 	
 	local range = value1 ~= nil;
 	local ret0, ret1, rawvalue0, rawvalue1;
@@ -109,7 +104,7 @@ function format(self, parts, value0, value1)
 		local expt;
 		local negt, post = value:match("^([+%-]?)(.+)$");
 		local rawvalue;
-		if post:match("^[%d.]*$") then
+		if post:match("^[%d.]*$") and select(2, post:gsub('%.', '')) < 2 then
 			local minfrac, maxfrac = self.minimumFractionDigits, self.maximumFractionDigits;
 			if self.notation == "compact" then
 				--[=[ Compact decimal formatting ]=]--
@@ -141,7 +136,7 @@ function format(self, parts, value0, value1)
 				end;
 				
 				if self.compactPattern.other[intlen] then
-					selectedPattern = checker.negotiate_plural_table(self.compactPattern, '', '', self.pluralRule, post)[intlen];
+					selectedPattern = checker.negotiate_plural_table(self.compactPattern, self.pluralRule, post)[intlen];
 				end;
 			elseif self.notation == "standard" then
 				if self.isSignificant then
@@ -156,7 +151,7 @@ function format(self, parts, value0, value1)
 				else
 					rawvalue = negt .. checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
-				post, expt = exp(post):match("^(%d*%.?%d*)E(%d*)$");
+				post, expt = exp(post, self.notation == "engineering"):match("^(%d*%.?%d*)E(-?%d*)$");
 				
 				if self.isSignificant then
 					post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
@@ -190,7 +185,7 @@ function format(self, parts, value0, value1)
 			local gs = (self.standardNPattern or standardPattern).metadata.integerGroupSize;
 			if (self.minimumGroupingDigits > 0) and (gs) and (#intg >= gs[1] + self.minimumGroupingDigits) then
 				local sym = ((self.style == "currency" and self.symbols.currencyGroup) or self.symbols.group);
-				if parts or (sym:match("[%%%d]")) or (gs[1] ~= gs[2]) then
+				if parts or (sym:match("[%%%d]")) then
 					local ret, rem;
 					if gs[1] == gs[2] then
 						ret, rem = parts and checker.initializepart() or checker.initializestringbuilder{}, intg:reverse();
@@ -206,8 +201,14 @@ function format(self, parts, value0, value1)
 					end;
 					table.remove(ret, 1);
 					intg = ret;
-				else
+				elseif gs[1] == gs[2] then
 					intg = checker.substitute(intg:reverse():gsub(('%d'):rep(gs[1]), "%1" .. sym:reverse()):reverse():match("^%D*(.*)$"), self.numberingSystem);
+				else
+					local ret, rem = intg:reverse():match(("^(%s)(.+)$"):format(("%d"):rep(gs[1])));
+					intg = checker.initializestringbuilder{
+						checker.substitute(rem:gsub(('%d'):rep(gs[2]), "%1" .. sym:reverse()):reverse():match("^%D*(.*)$"), self.numberingSystem),
+						sym, checker.substitute(ret:reverse(), self.numberingSystem)
+					};
 				end;
 			elseif parts then
 				intg = { type = "integer", value = checker.substitute(intg, self.numberingSystem), source = source };
@@ -268,7 +269,7 @@ function format(self, parts, value0, value1)
 		local standard = format_pattern(self, selectedPattern and (parts and checker.initializepart() or checker.initializestringbuilder{}) or start, post, pattern, negt, false, source);
 		
 		if selectedPattern then
-			standard = format_pattern(self, start, standard, selectedPattern.postoken or selectedPattern, negt, parts, source);
+			standard = format_pattern(self, start, standard, (negt and selectedPattern.negtoken) or selectedPattern.postoken or selectedPattern, negt, parts, source);
 		end;
 		if i == 0 then
 			ret0 = standard;
@@ -284,15 +285,15 @@ function format(self, parts, value0, value1)
 	if self.style ~= "unit" and (self.style ~= "currency" or self.currencyDisplay ~= "name") then
 		return parts and setmetatable(ret, nil) or ret;
 	end;
-	local unitPattern = checker.negotiate_plural_table(self.unitPattern, 'unitPattern-count-', '', self.pluralRule, rawvalue0, rawvalue1);
-	local currencyName = (self.currencyData and checker.negotiate_plural_table(self.currencyData, 'displayName-count-', '', self.pluralRule, rawvalue0, rawvalue1));
+	local unitPattern = checker.negotiate_plural_table(self.unitPattern, self.pluralRule, rawvalue0, rawvalue1);
+	local currencyName = (self.currencyData and checker.negotiate_plural_table(self.currencyData, self.pluralRule, rawvalue0, rawvalue1));
 	local unit0 = parts and checker.formattoparts(self.style == "unit" and "unit", checker.initializepart(), unitPattern, range and 'shared' or nil, ret, currencyName and { type = "currency", value = currencyName })
 		or (unitPattern:gsub('{0}', ret):gsub('{1}', currencyName or self.currency or ''));
 	if self.compoundUnitPattern then
 		if self.unitPattern1.perUnitPattern then
 			return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, range and 'shared' or nil, unit0), nil) or (self.unitPattern1.perUnitPattern:gsub('{0}', unit0 or ''));
 		end;
-		local unit1 = checker.negotiate_plural_table(self.unitPattern1, 'unitPattern-count-', '', self.pluralRule, 1):gsub('%s*{0}%s*', '');
+		local unit1 = checker.negotiate_plural_table(self.unitPattern1, self.pluralRule, 1):gsub('%s*{0}%s*', '');
 		return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, range and 'shared' or nil, unit0, unit1), nil) or (self.compoundUnitPattern:gsub('{0}', unit0 or ''):gsub('{1}', unit1 or ''));
 	end;
 	return parts and setmetatable(unit0, nil) or unit0;
@@ -377,6 +378,10 @@ function nf.new(...)
 	pointer_mt.__newindex = checker.readonly;
 	pointer_mt.__metatable = checker.lockmsg;
 	return pointer;
+end;
+
+function nf.SupportedLocalesOf(locales)
+	return checker.supportedlocale('main', locales);
 end;
 
 nf._private = {
