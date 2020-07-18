@@ -1,6 +1,20 @@
 local _data = script.Parent:WaitForChild("_data");
-local _coredata = require(_data:WaitForChild("_core"));
-local _cache = setmetatable({ }, { __mode = 'v' });
+local supplemental = require(_data:WaitForChild("supplemental"));
+local Alias = require(_data:WaitForChild("Alias"));
+local setinherit = require(_data:WaitForChild("setinherit"));
+
+local commons = {
+	main = _data:WaitForChild("main"),
+	segments = _data:WaitForChild("segments"),
+}
+
+-- Threshold, exclues raw
+local cache_threshold = 6;
+local _cache = {
+	data = { },
+	locale = { },
+};
+
 local d = { };
 
 local function title_case_gsub(first, other)
@@ -10,7 +24,7 @@ local function title_case(str)
 	return str:gsub("^(.)(.*)$", title_case_gsub);
 end;
 
-local aliases = _coredata.metadata.alias;
+local aliases = supplemental.metadata.alias;
 function d.getalias(key, val)
 	return aliases[key][val] and aliases[key][val]._replacement:match("^%S+") or val;
 end;
@@ -53,14 +67,14 @@ function d.rawmaximize(locale, exclude_und)
 	local ret0, ret1, ret2;
 	if region then
 		if script then
-			ret0 = _coredata.likelySubtags[language_script .. '-' .. region];
+			ret0 = supplemental.likelySubtags[language_script .. '-' .. region];
 		end;
-		ret1 = _coredata.likelySubtags[language .. '-' .. region];
+		ret1 = supplemental.likelySubtags[language .. '-' .. region];
 	end;
 	if script then
-		ret2 = _coredata.likelySubtags[language_script];
+		ret2 = supplemental.likelySubtags[language_script];
 	end;
-	local ret_language, ret_script, ret_region = d.getlocaleparts(ret0 or ret1 or ret2 or _coredata.likelySubtags[language] or locale);
+	local ret_language, ret_script, ret_region = d.getlocaleparts(ret0 or ret1 or ret2 or supplemental.likelySubtags[language] or locale);
 	if language and (exclude_und or language ~= 'und') then
 		ret_language = language;
 	end;
@@ -81,7 +95,7 @@ function d.maximizestr(locale, exclude_und)
 end;
 
 local reverseLikelySubtags = { };
-for k, v in next, _coredata.likelySubtags do
+for k, v in next, supplemental.likelySubtags do
 	if not k:match("^und%-") then
 		reverseLikelySubtags[v] = k;
 	end;
@@ -141,36 +155,38 @@ function d.minimizestr(locale, exclude_und)
 		.. ((variant and ('-' .. variant)) or '');
 end;
 
-local parentlocale = _coredata.parentLocales.parentLocale;
+local parentlocale = supplemental.parentLocales.parentLocale;
 function d.negotiateparent(locale)
 	locale = d.getlocalename(locale);
-	return parentlocale[locale] or (locale:match('%-') and locale:gsub("%-%w+$", ''));
+	return parentlocale[locale] or (locale:match('%-') and locale:gsub("%-%w+$", '') or (locale ~= 'root' and 'root' or nil));
 end;
 
---[[
-local function deepcopymerge(t0, t1, level)
+local function deepcopymerge(t0, t1)
 	local copy = { };
 	if t0 then
-		-- Don't copy array and tokenised number/date format
 		for k, v in next, t0 do
-			if (type(v) == "table" and level ~= 0) and (#v == 0) and (not v.postoken) then
-				copy[k] = deepcopymerge(v, nil, level and (level - 1));
+			if type(v) == "table" and setinherit[v] ~= 0 then
+				copy[k] = deepcopymerge(v, nil);
 			else
 				copy[k] = v;
 			end;
 		end;
 	elseif t1 then
-		return deepcopymerge(t1);
+		return deepcopymerge(t1, nil);
 	else
 		return nil;
 	end;
 	if t1 then
 		for k, v in next, t1 do
-			if (type(v) == "table" and level ~= 0) and (#v == 0) and (not v.postoken) then
-				if type(t0[k]) == "table" and (#t0[k] == 0) then
-					copy[k] = deepcopymerge(t0[k], v, level and (level - 1));
+			if type(v) == "table" and setinherit[v] ~= 0 then
+				if type(t0[k]) == "table" then
+					if setinherit[v] == 1 then
+						copy[k] = table.move(v, 1, #v, #t0[k] + 1, t0[k]);
+					else
+						copy[k] = deepcopymerge(t0[k], v);
+					end;
 				else
-					copy[k] = deepcopymerge(v, nil, level and (level - 1));
+					copy[k] = deepcopymerge(v, nil);
 				end;
 			else
 				copy[k] = v;
@@ -179,42 +195,63 @@ local function deepcopymerge(t0, t1, level)
 	end;
 	return copy;
 end;
-]]
 
-local localedataproxy = setmetatable({ }, { __mode = 'k' });
-local function localedataindex(self, index)
-	return localedataproxy[self][index];
-end;
-local function requireifnotnil(inst)
-	if inst then
-		local localedata = newproxy(true);
-		localedataproxy[localedata] = require(inst);
-		local localedata_mt = getmetatable(localedata);
-		localedata_mt.__index = localedataindex;
-		localedata_mt.__metatable = "The metatable is locked";
-		return localedata;
+local function resolve_alias(tbl, org_table)
+	for k, v in next, tbl do
+		if Alias.isAlias(v) then
+			tbl[k] = v:Resolve(org_table or tbl);
+		elseif type(v) == "table" then
+			tbl[k] = resolve_alias(v, org_table or tbl);
+		end;
 	end;
-	return nil;
+	return tbl;
 end;
 
-function d.getdata(locale)
+local function requireifnotnil(inst)
+	return inst and require(inst);
+end;
+
+local function rawgetdata(ttype, locale)
 	if locale == nil then
 		return nil;
 	end;
 	locale = d.getlocalename(locale);
 	
-	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
-	if _cache[locale] == nil then
-		local ms = requireifnotnil(_data:FindFirstChild(minimized)) or requireifnotnil(_data:FindFirstChild(maximized));
-		if ms then
-			_cache[locale] = ms;
-		else
-			_cache[locale] = d.getdata(d.negotiateparent(minimized)) or requireifnotnil(_data:FindFirstChild(d.negotiateparent(maximized) or '')) or false;
-		end;
-	end;
-	return _cache[locale];
+	return deepcopymerge(rawgetdata(ttype, d.negotiateparent(locale)), requireifnotnil(commons[ttype]:FindFirstChild(locale)));
 end;
 
-d.coredata = _coredata;
+function d.getdata(ttype, locale)
+	if locale == nil then
+		return nil;
+	end;
+	locale = d.getlocalename(locale);
+	
+	local localepos = table.find(_cache.locale, ttype .. '/' .. locale);
+	if localepos then
+		return _cache.data[localepos];
+	end;
+	
+	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
+	local ms = resolve_alias(deepcopymerge(rawgetdata(ttype, d.negotiateparent(minimized)) or rawgetdata(ttype, d.negotiateparent(maximized)), 
+		requireifnotnil(commons[ttype]:FindFirstChild(minimized)) or requireifnotnil(commons[ttype]:FindFirstChild(maximized))));
+	
+	table.insert(_cache.data, 1, ms or false);
+	table.insert(_cache.locale, 1, ttype .. '/' .. locale);
+	table.remove(_cache.data, cache_threshold);
+	table.remove(_cache.locale, cache_threshold);
+	return ms;
+end;
+
+function d.exists(ttype, locale)
+	if locale == nil or locale == "root" then
+		return false;
+	end;
+	locale = d.getlocalename(locale);
+	
+	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
+	return not not (d.exists(d.negotiateparent(minimized)) or d.exists(d.negotiateparent(maximized)) or commons[ttype]:FindFirstChild(minimized) or commons[ttype]:FindFirstChild(maximized));
+end;
+
+d.supplemental = supplemental;
 
 return d;
