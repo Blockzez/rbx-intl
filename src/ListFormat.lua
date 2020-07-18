@@ -1,10 +1,6 @@
 local checker = require(script.Parent:WaitForChild("_checker"));
 local intl_proxy = setmetatable({ }, checker.weaktable);
 local lf = { };
-lf._private =
-{
-	intl_proxy = intl_proxy,
-};
 
 local function format_to_parts(self, value)
 	local ret, pret = nil, checker.checker.initializepart();
@@ -104,4 +100,12 @@ function lf.new(...)
 	return pointer;
 end;
 
+function lf.SupportedLocalesOf(locales)
+	return checker.supportedlocale('main', locales);
+end;
+
+lf._private = {
+	format = format,
+	intl_proxy = intl_proxy,
+};
 return lf;
