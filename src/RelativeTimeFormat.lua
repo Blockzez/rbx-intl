@@ -28,7 +28,7 @@ function format(self, parts, value, unit)
 	value = tonumber(value);
 	local absvalue = math.abs(value);
 	if value ~= value then
-		error("Value must not be NaN", 2);
+		error("Value must not be NaN", 4);
 	end
 	if type(unit) ~= "string" then
 		error("invalid argument #2 (string expected, got " .. typeof(unit) .. ")", 4);
@@ -36,8 +36,8 @@ function format(self, parts, value, unit)
 		error("Invalid unit argument '" .. unit .. "'", 4);
 	end;
 	local pattern = self.fields[allowed_unit[unit] .. (self.style == "long" and '' or ('-' .. self.style))];
-	pattern = (self.numeric == "auto" and pattern["relative-type-" .. value])	
-		or checker.negotiate_plural_table(pattern[value < 0 and "relativeTime-type-past" or "relativeTime-type-future"], 'relativeTimePattern-count-', '', self.pluralRule, absvalue);
+	pattern = (self.numeric == "auto" and pattern[tostring(value)])	
+		or checker.negotiate_plural_table(pattern[value < 0 and "past" or "future"], self.pluralRule, absvalue);
 	if parts then
 		local number_parts = self.numberFormat:FormatToParts(absvalue);
 		for _, v in ipairs(number_parts) do
@@ -99,6 +99,10 @@ function rtf.new(...)
 	pointer_mt.__newindex = checker.readonly;
 	pointer_mt.__metatable = checker.lockmsg;
 	return pointer;
+end;
+
+function rtf.SupportedLocalesOf(locales)
+	return checker.supportedlocale('main', locales);
 end;
 
 return rtf;
