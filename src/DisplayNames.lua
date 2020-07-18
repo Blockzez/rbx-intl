@@ -130,4 +130,8 @@ function dn.new(...)
 	return pointer;
 end;
 
+function dn.SupportedLocalesOf(locales)
+	return checker.supportedlocale('main', locales);
+end;
+
 return dn;
