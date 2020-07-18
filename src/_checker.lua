@@ -47,6 +47,7 @@ local valid_value_property =
 	["g/numberingSystem"] = { "arab", "arabext", "bali", "beng", "deva", "fullwide", "gujr", "guru", "hanidec", "khmr", "knda", "laoo", "latn", "limb", "mlym", "mong", "mymr", "orya", "tamldec", "telu", "thai", "tibt" },
 	["g/calendar"] = { "buddhist", "chinese", "coptic", "ethiopia", "ethiopic", "gregory", "hebrew", "indian", "islamic", "iso8601", "japanese", "persian", "roc" },
 	["g/hourCycle"] = { "h11", "h12", "h23", "h24" },
+	["g/suppression"] = { "none", "standard" },
 	
 	["dn/style"] = "%display1",
 	["dn/type"] = { "language", "region", "script", "variant", "currency" },
@@ -61,11 +62,11 @@ local valid_value_property =
 	["nu/unitDisplay"] = "%display1",
 	["nu/useGrouping"] = { "min2", "auto", "always", "never" },
 	["nu/minimumIntegerDigits"] = "f/1..",
-	["nu/maximumIntegerDigits"] = "f/minimumIntegerDigits..",
+	["nu/maximumIntegerDigits"] = "f/minimumIntegerDigits..inf",
 	["nu/minimumFractionDigits"] = "f/0..",
-	["nu/maximumFractionDigits"] = "f/minimumFractionDigits..",
+	["nu/maximumFractionDigits"] = "f/minimumFractionDigits..inf",
 	["nu/minimumSignificantDigits"] = "f/1..",
-	["nu/maximumSignificantDigits"] = "f/minimumSignificantDigits..",
+	["nu/maximumSignificantDigits"] = "f/minimumSignificantDigits..inf",
 	["nu/currency"] = "lp/^%a%a%a$",
 	["nu/unit"] = "f/str",
 	["nu/rounding"] = { "halfUp", "halfEven", "halfDown", "ceiling", "floor" },
@@ -90,6 +91,8 @@ local valid_value_property =
 	
 	["lf/type"] = { "conjunction", "disjunction", "unit" },
 	["lf/style"] = "%display1",
+	
+	["sg/granularity"] = { "grapheme", "word", "sentence" }
 };
 local function check_property(tbl_out, tbl_to_check, property, default)
 	local check_values = valid_value_property[property];
@@ -97,7 +100,7 @@ local function check_property(tbl_out, tbl_to_check, property, default)
 		check_values = valid_value_property[check_values] or check_values;
 	end;
 	
-	property = property:match("%a+/(%w+)");
+	property = property:match("^%a+/(%w+)$");
 	local value = rawget(tbl_to_check, property);
 	local valid = false;
 	if type(check_values) == "table" then
@@ -109,10 +112,10 @@ local function check_property(tbl_out, tbl_to_check, property, default)
 	elseif not check_values then
 		valid = true;
 	elseif check_values:match('^lp/') then
-		valid = (type(value) == "string") and (value:match(check_values:match("lp/(.+)")));
+		valid = (type(value) == "string") and (value:match(check_values:match("^lp/(.+)$")));
 	elseif type(value) == "number" and (value % 1 == 0) or (value == math.huge) then
-		local min, max = check_values:match("f/(%w*)%.%.(%w*)");
-		valid = (value >= (tbl_out[min] or tonumber(min) or 0)) and (max == '' or (value <= tonumber(max)));
+		local min, max = check_values:match("^f/(%w*)%.%.(%w*)$");
+		valid = (value >= (tbl_out[min] or tonumber(min) or 0)) and ((max == '' and value ~= math.huge) or (value <= tonumber(max)));
 	end;
 	if valid then
 		tbl_out[property] = value;
@@ -127,10 +130,10 @@ local function check_property(tbl_out, tbl_to_check, property, default)
 	error(property .. " value is out of range.", 4);
 end;
 
-local day_period_rule = localedata.coredata.dayPeriodRuleSet;
-local time_data = localedata.coredata.timeData;
+local day_period_rule = localedata.supplemental.dayPeriodRuleSet;
+local time_data = localedata.supplemental.timeData;
 
-function c.negotiatelocale(locales)
+function c.negotiatelocale(ttype, locales)
 	-- Negotiate locales
 	local data;
 	if type(locales) == "table" then
@@ -146,30 +149,67 @@ function c.negotiatelocale(locales)
 	else
 		error("Incorrect locale information provided", 3);
 	end;
-	for _, locale in ipairs(locales) do
+	for _, locale in next, locales do
 		if type(locale) ~= "string" and (not Locale._private.intl_proxy[locale]) and locale ~= nil then
-			error("Incorrect locale information provided", 3);
+			error("Language ID should be string or Locale", 3);
 		end;
 		locale = Locale._private.intl_proxy[locale] and locale or Locale.new(locale);
-		data = localedata.getdata(localedata.getlocalename(locale));
-		if data then
+		if localedata.exists(ttype, locale) then
+			data = localedata.getdata(ttype, locale);
 			locales = locale;
 			break;
 		end;
 	end;
 	if not data then
-		return 'root', localedata.getdata('root');
+		return 'root', localedata.getdata(ttype, 'root');
 	end;
 	return locales, data;
 end;
 
+function c.supportedlocale(ttype, locales)
+	if type(locales) == "table" then
+		local ret = { };
+		for _, locale in next, locales do
+			if type(locale) ~= "string" and (not Locale._private.intl_proxy[locale]) and locale ~= nil then
+				error("Language ID should be string or Locale", 3);
+			end;
+			locale = Locale._private.intl_proxy[locale] and locale or Locale.new(locale);
+			if localedata.exists('main', locale) then
+				table.insert(ret, tostring(locale));
+			end;
+		end;
+		return ret;
+	elseif type(locales) == "string" or Locale._private.intl_proxy[locales] then
+		return { localedata.exists('main', Locale._private.intl_proxy[locales] and locales or Locale.new(locales)) and tostring(locales) or nil };
+	elseif locales == nil then
+		return { };
+	end;
+	error("Incorrect locale information provided", 3);
+end;
+
 local calendar_alias = { gregory = "gregorian", japanese = "japanese", buddhist = "buddhist", roc = "roc", islamic = "islamic" };
+local granularity_alias = { grapheme = "GraphemeClusterBreak", word = "WordBreak", sentence = "SentenceBreak" };
+
+local function rules_lt(v0, v1)
+	local v0_0, v0_1 = v0[1]:match("^(%d+)%.?(%d*)$");
+	local v1_0, v1_1 = v1[1]:match("^(%d+)%.?(%d*)$");
+	v0_0, v1_0 = tonumber(v0_0), tonumber(v1_0);
+	if v0_0 ~= v1_0 then
+		return v0_0 < v1_0;
+	end;
+	return (tonumber(v0_1) or 0) < (tonumber(v1_1) or 0);
+end;
+
+local function suppression_gt(s0, s1)
+	return #s0 > #s1;
+end;
+
 function c.options(ttype, locales, options)
 	local ret = { };
 	if type(options) ~= "table" then
 		options = { };
 	end;
-	local locale, data = c.negotiatelocale(locales);
+	local locale, data = c.negotiatelocale(ttype == "sg" and "segments" or 'main', locales);
 	ret.locale = locale;
 	local t, v = ttype:match("(%w+)/?(%w*)");
 	if v == '' then
@@ -213,15 +253,15 @@ function c.options(ttype, locales, options)
 		end;
 		
 		local numbers = data.numbers;
-		ret.symbols = c.negotiate_numbering_system(numbers, 'symbols-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
+		ret.symbols = c.negotiate_numbering_system(numbers.symbols, ret.numberingSystem, numbers.defaultNumberingSystem);
 		ret.minimumGroupingDigits = (ret.useGrouping == "min2" and 2) or (ret.useGrouping == "always" and 1) or (ret.useGrouping == "never" and 0) or numbers.minimumGroupingDigits;
 		
-		local decimalPattern = c.negotiate_numbering_system(numbers, ((ret.style == "percent" and ret.notation ~= "compact") and 'percent' or 'decimal') .. 'Formats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
+		local decimalPattern = c.negotiate_numbering_system(numbers.formats[(ret.style == "percent" and ret.notation ~= "compact") and 'percent' or 'decimal'], ret.numberingSystem, numbers.defaultNumberingSystem);
 		if ret.style == "currency" and (ret.currencyDisplay ~= "name") then
 			if ret.notation == "compact" then
 				ret.standardPattern = decimalPattern.standard;
 			end;
-			local currencyFormat = c.negotiate_numbering_system(numbers, 'currencyFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
+			local currencyFormat = c.negotiate_numbering_system(numbers.formats.currency, ret.numberingSystem, numbers.defaultNumberingSystem);
 			ret[ret.notation == "compact" and 'standardNPattern' or 'standardPattern'] = currencyFormat[ret.currencySign] or currencyFormat.standard;
 			ret.currencyData = numbers.currencies and numbers.currencies[ret.currency];
 			ret.currencySpacing = currencyFormat.currencySpacing;
@@ -230,7 +270,7 @@ function c.options(ttype, locales, options)
 		end;
 		if ret.style == "unit" or (ret.style == "currency" and ret.currencyDisplay == "name") then
 			if ret.style == "unit" then
-				local availableUnits = data.units[ret.unitDisplay];
+				local availableUnits = data.unit[ret.unitDisplay];
 				ret.unitPattern = availableUnits[ret.unit];
 				if not ret.unitPattern then
 					local unit0, unit1 = unpack(ret.unit:split('-per-'));
@@ -246,25 +286,25 @@ function c.options(ttype, locales, options)
 					error("Invalid unit argument for this locale '" .. ret.unit .. "'", 3);
 				end;
 			else
-				ret.standardNPattern = c.negotiate_numbering_system(numbers, 'currencyFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn').standard;
-				ret.unitPattern = c.negotiate_numbering_system(numbers, 'currencyFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
+				ret.standardNPattern = c.negotiate_numbering_system(numbers.formats.currency, ret.numberingSystem, numbers.defaultNumberingSystem).standard;
+				ret.unitPattern = c.negotiate_numbering_system_index('unitPattern', numbers.formats.currency, ret.numberingSystem, numbers.defaultNumberingSystem);
 				ret.currencyData = numbers.currencies and numbers.currencies[ret.currency];
 			end;
 		elseif ret.style == "percent" and ret.notation == "compact" then
-			ret.standardNPattern = c.negotiate_numbering_system(numbers, 'percentFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn').standard;
+			ret.standardNPattern = c.negotiate_numbering_system(numbers.formats.percent, ret.numberingSystem, numbers.defaultNumberingSystem).standard;
 		end;
 		if ret.notation == "compact" then
 			if ret.style == "currency" and (ret.currencyDisplay ~= "name") then
-				ret.compactPattern = c.negotiate_numbering_system_index('short', numbers, 'currencyFormats-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn').standard;
+				ret.compactPattern = c.negotiate_numbering_system_index('short', numbers.formats.currency, ret.numberingSystem, numbers.defaultNumberingSystem);
 			else
-				ret.compactPattern = decimalPattern[ret.compactDisplay].decimalFormat;
+				ret.compactPattern = decimalPattern[ret.compactDisplay];
 			end;
 		end;
-		ret.rangePattern = c.negotiate_numbering_system_index('range', numbers, 'miscPatterns-numberSystem-', '', ret.numberingSystem, numbers.defaultNumberingSystem, 'latn');
+		ret.rangePattern = c.negotiate_numbering_system_index('range', numbers.misc, ret.numberingSystem, numbers.defaultNumberingSystem);
 	elseif t == "pr" then
 		check_property(ret, options, 'pr/type', 'cardinal');
 	elseif t == "dt" then
-		local calpref = localedata.coredata.calendarPreferenceData;
+		local calpref = localedata.supplemental.calendarPreferenceData;
 		local region = (select(3, localedata.rawmaximize(locale)));
 		check_property(ret, options, 'g/calendar', valid_value_property["g/calendar"][table.find(valid_value_property["g/calendar"], locale.calendar)] or (calpref[region] or calpref['001']):gsub(' .*$', ''));
 		ret.data = data.dates.calendars[calendar_alias[ret.calendar]] or data.dates.calendars.gregorian;
@@ -308,10 +348,32 @@ function c.options(ttype, locales, options)
 	elseif t == "lf" then
 		check_property(ret, options, 'lf/type', 'conjunction');
 		check_property(ret, options, 'lf/style', 'long');
-		local p = data.listPatterns["listPattern-type-" .. (ret.type:gsub('disjunction', 'or'):gsub('conjunction', 'standard'))
+		local p = data.listPatterns[(ret.type:gsub('disjunction', 'or'):gsub('conjunction', 'standard'))
 			.. (ret.style == "long" and '' or ('-' .. ret.style))];
 		ret.pattern = p;
 		ret.t, ret.s, ret.m, ret.e = c.tokenizeformat(p['2']), c.tokenizeformat(p['start']), c.tokenizeformat(p['middle']), c.tokenizeformat(p['end']);
+	elseif t == "sg" then
+		check_property(ret, options, 'sg/granularity', 'grapheme');
+		check_property(ret, options, 'g/suppression', valid_value_property["g/suppression"][table.find(valid_value_property["g/suppression"], locale.suppression) or 1]);
+		local d = data[granularity_alias[ret.granularity]];
+		if d then
+			ret.variables = { };
+			for _, v in ipairs(d.variables) do
+				-- Ignore format and extend characters by default
+				if not (v[2]:find("%$Extend") or v[2]:find("%$FE")) then
+					ret.variables[v[1]] = v[2]:gsub('%$[%a_]+', ret.variables);
+				end;
+			end;
+			ret.rules = { };
+			for k, v in next, d.segmentRules do
+				table.insert(ret.rules, { k, (v:gsub('%$[%a_]+', ret.variables)) })
+			end;
+			local suppressions = d.suppressions and d.suppressions[ret.suppression];
+			if suppressions then
+				ret.suppressions = table.move(suppressions, 1, #suppressions, 1, table.create(#suppressions));
+				table.sort(ret.suppressions, suppression_gt);
+			end;
+		end;
 	end;
 	if t == "nu" or t == "pr" or t == "rt" then
 		check_property(ret, options, 'nu/rounding', 'halfEven');
@@ -327,7 +389,7 @@ function c.options(ttype, locales, options)
 			
 			if not (ret.minimumFractionDigits or ret.maximumFractionDigits) then
 				if (ret.style == "currency" and ret.notation ~= "compact") then
-					local currencyDataFractions = localedata.coredata.currencyData.fractions;
+					local currencyDataFractions = localedata.supplemental.currencyData.fractions;
 					local digits = (currencyDataFractions[ret.currency] and currencyDataFractions[ret.currency]._digits) or 2;
 					ret.minimumFractionDigits = digits;
 					ret.maximumFractionDigits = digits;
@@ -358,9 +420,7 @@ local part_mt =
 			end;
 			return other;
 		else
-			for _, v in ipairs(other) do
-				table.insert(self, v);
-			end;
+			table.move(other, 1, #other, #self + 1, self);
 		end;
 		return self;
 	end;
@@ -514,46 +574,46 @@ function c.spacestoparts(value)
 end;
 
 --
-function c.negotiate_plural_table(tbl, prefix, suffix, plural_rule, value0, value1)
+function c.negotiate_plural_table(tbl, plural_rule, value0, value1)
 	local plural0, plural1 = plural_rule:Select(value0), value1 and plural_rule:Select(value1);
 	local plural;
 	if value1 then
-		local data = localedata.coredata['plurals-type-pluralRanges'];
+		local data = localedata.supplemental['plurals-type-pluralRanges'];
 		local pos = localedata.minimizestr(plural_rule:ResolvedOptions().locale.baseName);
 		while (not data[pos]) and pos do
 			pos = localedata.negotiateparent(pos);
 		end;
 		plural = (data[pos] and data[pos][plural0] and data[pos][plural0][plural1]) or plural1
 	else
-		plural = value0;
+		plural = plural0;
 	end;
-	return (not value1 and tbl[prefix .. value0 .. suffix]) or tbl[prefix .. plural .. suffix] or tbl[prefix .. 'other' .. suffix];
+	return (not value1 and (tbl[tostring(value0)] or tbl[tostring(value0)])) or tbl[plural] or tbl['other'];
 end;
 
-function c.negotiate_numbering_system(tbl, prefix, suffix, ...)
+function c.negotiate_numbering_system(tbl, ...)
 	local args = { ... };
 	for _, v in next, args do
 		if v then
-			local value = tbl[prefix .. v .. suffix];
+			local value = tbl[v];
 			if value then
 				return value;
 			end;
 		end;
 	end;
-	return nil;
+	return tbl.latn or tbl[false];
 end;
 
-function c.negotiate_numbering_system_index(index, tbl, prefix, suffix, ...)
+function c.negotiate_numbering_system_index(index, tbl, ...)
 	local args = { ... };
 	for _,v in next, args do
 		if v then
-			local value = tbl[prefix .. v .. suffix];
+			local value = tbl[v];
 			if value and value[index] then
 				return value[index];
 			end;
 		end;
 	end;
-	return nil;
+	return (tbl.latn and tbl.latn[index]) or (tbl[false] and tbl[false][index]);
 end;
 
 function c.literalize(str)
@@ -565,7 +625,7 @@ function c.literalgsub(str, pattern, repl)
 end;
 
 local substitute_chars = { };
-for ns, tbl in next, localedata.coredata.numberingSystems do
+for ns, tbl in next, localedata.supplemental.numberingSystems do
 	if ns ~= "latn" then
 		substitute_chars[ns] = function(d)
 			return tbl._digits[tonumber(d) + 1];
@@ -676,7 +736,7 @@ end;
 function c.num_to_str(value, scale_v)
 	local value_type = typeof(value);
 	if value_type == "number" then
-		value = (('%.17f'):format(value));
+		value = ('%.17f'):format(value);
 	else
 		value = tostring(value);
 		value = c.parse_exp(value) or value:lower();
