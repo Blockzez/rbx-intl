@@ -15,6 +15,7 @@ local u_alias =
 	nu = "numberingSystem",
 	co = "collation",
 	cf = "caseFirst",
+	ss = "suppression",
 };
 
 local u_extension_order = { };
@@ -34,6 +35,7 @@ local validOptions = {
 	numberingSystem = true,
 	collation = true,
 	caseFirst = true,
+	suppression = true,
 };
 
 -- https://www.unicode.org/reports/tr35/#Identifiers
@@ -290,17 +292,6 @@ function l.new(...)
 	elseif intl_proxy[value] then
 		-- Locale data, since this is immutible it doesn't matter whether it's passed by referenece or not
 		data = intl_proxy[value];
-	elseif type(value) == "userdata" and type(getmetatable(value)) == "table" then
-		local locale_mt = getmetatable(value).__locale;
-		if locale_mt ~= nil then
-			local result, options = locale_mt(value, options);
-			if type(result) == "string" then
-				return l.new(result, options);
-			elseif intl_proxy[result] then
-				return result;
-			end;
-		end;
-		error("Incorrect locale information provided", 2);
 	else
 		-- As no valid Unicode BCP 47 locale contain only numbers
 		-- There's no point converting it to string
@@ -346,7 +337,8 @@ function l.SetLocale(locale)
 	runtimeLocale = locale;
 end;
 function l.GetLocale(locale)
-	return runtimeLocale or (l.RobloxLocale.baseName ~= "und-Zzzz-ZZ" and l.RobloxLocale) or l.SystemLocale;
+	return runtimeLocale or ((not l.RobloxLocale.baseName:match("^und")) and l.RobloxLocale) or l.SystemLocale;
 end;
+
 
 return l;
