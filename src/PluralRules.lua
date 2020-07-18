@@ -2,8 +2,7 @@ local localedata = require(script.Parent:WaitForChild("_localedata"));
 local checker = require(script.Parent:WaitForChild("_checker"));
 local p = { };
 local intl_proxy = setmetatable({ }, checker.weaktable);
-p._private =
-{
+p._private = {
 	intl_proxy = intl_proxy
 };
 
@@ -131,7 +130,7 @@ local function pr_select(rules, val)
 	return 'other';
 end;
 
-local _CACHE = { cardinal = setmetatable({ }, checker.weaktable), ordinal = setmetatable({ }, checker.weaktable) };
+local _CACHE = setmetatable({ }, checker.weaktable);
 local function pselect(self, ...)
 	if select('#', ...) == 0 then
 		error("missing argument #1 (number expected)", 2);
@@ -152,27 +151,26 @@ local function pselect(self, ...)
 	else
 		value = checker.raw_format(value, self.minimumIntegerDigits, self.maximumIntegerDigits, self.minimumFractionDigits, self.maximumFractionDigits, self.rounding);
 	end;
-	if _CACHE[self.type][self.locale] ~= nil then
-		return pr_select(_CACHE[self.type][self.locale], value);
+	if _CACHE[self] ~= nil then
+		return pr_select(_CACHE[self], value);
 	end;
-	local data = localedata.coredata['plurals-type-' .. self.type];
+	local data = localedata.supplemental['plurals-type-' .. self.type];
 	local pos = localedata.minimizestr(self.locale.baseName);
 	while (data[pos] == nil) and pos do
 		pos = localedata.negotiateparent(pos);
 	end;
 	if data[pos] then
-		local rule =
-		{
+		local rule = {
 			zero = generate(data[pos].zero),
 			one = generate(data[pos].one),
 			two = generate(data[pos].two),
 			few = generate(data[pos].few),
 			many = generate(data[pos].many),
 		};
-		_CACHE[self.type][self.locale] = rule;
+		_CACHE[self] = rule;
 		return pr_select(rule, value);
 	end;
-	_CACHE[self.type][self.locale] = false;
+	_CACHE[self] = false;
 	return 'other';
 end;
 
@@ -195,14 +193,15 @@ function methods:ResolvedOptions()
 end;
 function methods:All()
 	local ret = { 'other' };
-	local data = _CACHE[self.type][self.locale];
+	local data = _CACHE[self];
 	if data == nil then
-		data = localedata.coredata['plurals-type-' .. self.type];
+		data = localedata.supplemental['plurals-type-' .. self.type];
 		local pos = localedata.minimizestr(self.locale.baseName);
 		while (data[pos] == nil) and pos do
 			pos = localedata.negotiateparent(pos);
 		end;
 		data = data[pos];
+		_CACHE[self] = data or false;
 	end;
 	if data then
 		if data.many then
@@ -236,6 +235,10 @@ function p.new(...)
 	pointer_mt.__newindex = checker.readonly;
 	pointer_mt.__metatable = checker.lockmsg;
 	return pointer;
+end;
+
+function p.SupportedLocalesOf(locales)
+	return checker.supportedlocale('main', locales);
 end;
 
 return p;
