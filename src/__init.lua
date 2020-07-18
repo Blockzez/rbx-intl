@@ -1,5 +1,5 @@
 --[=[
-	Version 2.2.0
+	Version 2.3.0
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -55,6 +55,7 @@ r("RelativeTimeFormat");
 r("DisplayNames");
 r("DateTimeFormat");
 r("ListFormat");
+r("Segmenter");
 
 function modules.testFormat(locale)
 	return ("%s\n%s\n%s    %s"):format(
@@ -139,7 +140,13 @@ function modules.toLocaleString(...)
 	if type(getmetatable(value)) == "table" then
 		local tolocalestring_method = getmetatable(value).__tolocalestring;
 		if tolocalestring_method ~= nil then
-			return tolocalestring_method(value, checker.negotiatelocale(locale), options);
+			local ret = tolocalestring_method(value, checker.negotiatelocale(locale), options);
+			if type(ret) == 'number' then
+				return modules.toLocaleString(ret);
+			elseif type(ret) ~= 'string' then
+				error("__tolocalestring must return a string", 2);
+			end;
+			return ret;
 		end;
 	end;
 	
@@ -152,14 +159,9 @@ function modules.toLocaleString(...)
 	elseif type == 'date' then
 		local option = checker.options('dt/datetime', locale, options);
 		option.format = private.DateTimeFormat.find_format(option, false);
-		option.formatRange, option.rangeFallback = private.DateTimeFormat.find_format(option, true);
-		option.rangeFallbackPattern = option.data.dateTimeFormats.intervalFormats.intervalFormatFallback;
-		option.rangeFallbackPatternToken = checker.tokenizeformat(option.rangeFallbackPattern);
-		return private.DateTimeFormat.format(options, false, value);
-	elseif type == 'Locale' then
-		return modules.DisplayNames.new(locale, options):Format(value);
+		return private.DateTimeFormat.format(option, false, value);
 	elseif type == 'list' then
-		return modules.ListFormat.new(locale, options):Format(value);
+		return (private.NumberFormat.format(checker.options('lf', locale, options), false, value));
 	elseif type == 'function' or type == 'thread' or type == "userdata" then
 		return '';
 	end;
@@ -172,18 +174,19 @@ function modules.toLocaleDateString(...)
 	end;
 	
 	local value, locale, options = ...;
-	if type(value) == "userdata" and type(getmetatable(value)) == "table" then
+	if type(getmetatable(value)) == "table" then
 		local tolocaledatestring_method = getmetatable(value).__tolocaledatestring;
 		if tolocaledatestring_method ~= nil then
-			return tolocaledatestring_method(value, checker.negotiatelocale(locale), options);
+			local ret = tolocaledatestring_method(value, checker.negotiatelocale(locale), options);
+			if type(ret) == "string" then
+				return ret;
+			end;
+			return modules.toLocaleDateString(ret);
 		end;
 	end;
 	
 	local option = checker.options('dt/date', locale, options);
 	option.format = private.DateTimeFormat.find_format(option, false);
-	option.formatRange, option.rangeFallback = private.DateTimeFormat.find_format(option, true);
-	option.rangeFallbackPattern = option.data.dateTimeFormats.intervalFormats.intervalFormatFallback;
-	option.rangeFallbackPatternToken = checker.tokenizeformat(option.rangeFallbackPattern);
 	return private.DateTimeFormat.format(option, false, value);
 end;
 
@@ -193,47 +196,39 @@ function modules.toLocaleTimeString(...)
 	end;
 	
 	local value, locale, options = ...;
-	if type(value) == "userdata" and type(getmetatable(value)) == "table" then
+	if type(getmetatable(value)) == "table" then
 		local tolocaletimestring_method = getmetatable(value).__tolocaletimestring;
 		if tolocaletimestring_method ~= nil then
-			return tolocaletimestring_method(value, checker.negotiatelocale(locale), options);
+			local ret = tolocaletimestring_method(value, checker.negotiatelocale(locale), options);
+			if type(ret) == "string" then
+				return ret;
+			end;
+			return modules.toLocaleTimeString(ret);
 		end;
 	end;
 	
-	local option = checker.options('dt/time', select(2, ...));
+	local option = checker.options('dt/time', locale, options);
 	option.format = private.DateTimeFormat.find_format(option, false);
-	option.formatRange, option.rangeFallback = private.DateTimeFormat.find_format(option, true);
-	option.rangeFallbackPattern = option.data.dateTimeFormats.intervalFormats.intervalFormatFallback;
-	option.rangeFallbackPatternToken = checker.tokenizeformat(option.rangeFallbackPattern);
 	return private.DateTimeFormat.format(option, false, (...));
 end;
 
-function modules.getCanonicalLocales(...)
-	local len = select('#', ...);
-	if len == 0 then
-		error("missing argument #1", 2);
-	end;
-	local ret0 = { };
-	for i = 1, len do
-		local locales = select(i, ...);
-		local ret1;
-		if type(locales) == "table" then
-			ret1 = { };
-			for i, v in ipairs(locales) do
-				if type(v) == "string" or private.Locale.intl_proxy[v] then
-					ret1[i] = tostring(private.Locale.intl_proxy[locales] and locales or modules.Locale.new(locales));
-				elseif v ~= nil then
-					error("Language ID should be string or Locale", 2);
-				end;
+function modules.getCanonicalLocales(locales)
+	if type(locales) == "table" then
+		local ret = { };
+		for _, v in next, locales do
+			if type(v) == "string" or private.Locale.intl_proxy[v] then
+				table.insert(ret, tostring(private.Locale.intl_proxy[locales] and locales or modules.Locale.new(locales)));
+			elseif v ~= nil then
+				error("Language ID should be string or Locale", 2);
 			end;
-		elseif type(locales) == "string" or private.Locale.intl_proxy[locales] then
-			ret1 = tostring(private.Locale.intl_proxy[locales] and locales or modules.Locale.new(locales));
-		elseif locales ~= nil then
-			error("Invalid argument #" .. i .. "(string, table or Locale expected, got " .. typeof(locales) .. ')', 2);
 		end;
-		ret0[i] = ret1;
+		return ret;
+	elseif type(locales) == "string" or private.Locale.intl_proxy[locales] then
+		return { tostring(private.Locale.intl_proxy[locales] and locales or modules.Locale.new(locales)) };
+	elseif locales == nil then
+		return { };
 	end;
-	return unpack(ret0, 1, len);
+	error("Incorrect locale information provided", 2);
 end;
 
 function modules.getType(intldata)
@@ -251,6 +246,8 @@ function modules.getType(intldata)
 		return "RelativeTimeFormat";
 	elseif private.ListFormat.intl_proxy[intldata] then
 		return "ListFormat";
+	elseif private.Segmenter.intl_proxy[intldata] then
+		return "Segmenter";
 	end;
 	return nil;
 end;
