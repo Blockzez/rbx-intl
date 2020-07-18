@@ -97,7 +97,7 @@ local function geterayearmonthdayhirji(days)
 end;
 
 -- Algorithmn: Solar calendars
-local caldata = localedata.coredata.calendarData;
+local caldata = localedata.supplemental.calendarData;
 local function geterayearmonthday(cal, year, month, day)
 	if not caldata[cal] then
 		return (year < 1 and '0' or '1'), year, month, day;
@@ -119,7 +119,7 @@ local function zero_pad_substitute(value, length, nu)
 	-- Just a sugar syntax
 	return checker.substitute(('%0' .. length .. 'd'):format(value), nu);
 end;
-local dayperiods = localedata.coredata.dayPeriods;
+local dayperiods = localedata.supplemental.dayPeriods;
 local function get_dayperiod(data, flexible)
 	local data1 = data.self.dayPeriodRule;
 	if data1 then
@@ -306,6 +306,18 @@ local char_pattern_flexible_find = { { 'G', 'y', 'M', 'd', 'E' }, { 'E', 'H', 'm
 local flexible_find_size = { ['numeric'] = 1, ['2-digit'] = 2, ['long'] = 4, ['short'] = 3, ['narrow'] = 5 };
 local smallest_diff_char = { { 'second', 's' }, { 'minute', 'm' }, { 'hour', 'H' }, { 'day', 'd' }, { 'month', 'M' }, { 'year', 'y' }, { 'era', 'G' } };
 
+local function joinformat(datetimef, timef, datef)
+	local ret = { };
+	for _, v in ipairs(datetimef) do
+		if v == 0 or v == 1 then
+			table.move(v == 0 and timef or datef, 1, #(v == 0 and timef or datef), #ret + 1, ret);
+		else
+			table.insert(ret, v);
+		end;
+	end;
+	return ret;
+end;
+
 local function find_format(self, range)
 	local data = self.data;
 	local fallback = true;
@@ -358,7 +370,7 @@ local function find_format(self, range)
 			end;
 			
 			if self.dateStyle then
-				result_format = checker.insertformat(data.dateTimeFormats[self.timeStyle or self.dateStyle or 'medium'], time_format, data.dateFormats[self.dateStyle or 'medium']);
+				result_format = joinformat(data.dateTimeFormats[self.dateStyle or self.timeStyle or 'medium'], time_format, data.dateFormats[self.dateStyle or 'medium']);
 			else
 				result_format = time_format;
 			end;
@@ -367,20 +379,20 @@ local function find_format(self, range)
 		end;
 	elseif not result_date_format then
 		if self.dateStyle then
-			result_format = checker.insertformat(data.dateTimeFormats[self.timeStyle or self.dateStyle], result_time_format, data.dateFormats[self.dateStyle]);
+			result_format = joinformat(data.dateTimeFormats[self.timeStyle or self.dateStyle], result_time_format, data.dateFormats[self.dateStyle]);
 		else
 			result_format = result_time_format;
 		end;
 		fallback = false;
 	elseif not result_time_format then
 		if self.timeStyle then
-			result_format = checker.insertformat(data.dateTimeFormats[self.timeStyle or self.dateStyle], data.timeFormats[self.timeStyle], result_time_format);
+			result_format = joinformat(data.dateTimeFormats[self.timeStyle or self.dateStyle], data.timeFormats[self.timeStyle], result_time_format);
 		else
 			result_format = result_date_format;
 		end;
 		fallback = false;
 	else
-		result_format = checker.insertformat(data.dateTimeFormats[self.timeStyle or 'medium'], result_time_format, result_date_format);
+		result_format = joinformat(data.dateTimeFormats[self.timeStyle or 'medium'], result_time_format, result_date_format);
 		fallback = false;
 	end;
 	return result_format, range and fallback;
@@ -405,7 +417,7 @@ local function format_pattern(self, start, pattern, parts, info0, info1, source_
 				size = flexible_find_size[self.era];
 			elseif dateunit == "y" and self.year then
 				size = flexible_find_size[self.year];
-			elseif dateunit == "M" and self.month then
+			elseif (dateunit == "M" or dateunit == "L") and self.month then
 				if ((flexible_find_size[self.month]) < 3) == (size < 3) then
 					size = flexible_find_size[self.month];
 					if type(pattern[i + 1]) == "string" and (flexible_find_size[self.month]) >= 3 then
@@ -415,6 +427,8 @@ local function format_pattern(self, start, pattern, parts, info0, info1, source_
 						value = getvalue[dateunit](self, info0, size):gsub('^' .. checker.literalize(pattern[i - 1]), '');
 					end;
 				end;
+			elseif (dateunit == "E" or dateunit == "c") and self.weekday then
+				size = flexible_find_size[self.weekday];
 			elseif dateunit == "d" and self.day then
 				size = flexible_find_size[self.day];
 			elseif dateunit == "a" and self.dayPeriod then
@@ -426,7 +440,7 @@ local function format_pattern(self, start, pattern, parts, info0, info1, source_
 			elseif dateunit == "s" and self.second then
 				size = flexible_find_size[self.second];
 			end;
-			ret = checker.addpart(ret, typename[dateunit], checker.substitute(value or getvalue[dateunit](self, source < 2 and info0 or info1, size), self.numberingSystem), parts and info1 and (source == 1 and 'shared' or (source == 0 and 'startRange' or 'endRange')));
+			ret = checker.addpart(ret, typename[dateunit], value or getvalue[dateunit](self, source < 2 and info0 or info1, size), parts and info1 and (source == 1 and 'shared' or (source == 0 and 'startRange' or 'endRange')));
 		else
 			ret = checker.addpart(ret, 'literal', v, parts and info1 and ((source_override or ((pattern[i + 1] and pattern[i + 1][3]) or current_range)) ~= current_range and 'shared' or (current_range == 0 and 'startRange' or 'endRange')));
 		end;
@@ -465,8 +479,7 @@ local function format(self, parts, date0, date1)
 	end;
 	
 	local era0, year0, month0, day0, weekday0 = geterayearmonthday(self.calendar, rawyear0, rawmonth0, rawday0);
-	local info0 =
-	{
+	local info0 = {
 		era = era0,
 		year = year0,
 		month = month0,
@@ -484,8 +497,7 @@ local function format(self, parts, date0, date1)
 	local info1;
 	if range then
 		local era1, year1, month1, day1, weekday1 = geterayearmonthday(self.calendar, rawyear1, rawmonth1, rawday1);
-		info1 =
-		{
+		info1 = {
 			era = era1,
 			year = year1,
 			month = month1,
@@ -617,6 +629,10 @@ function dtf.new(...)
 	pointer_mt.__newindex = checker.readonly;
 	pointer_mt.__metatable = checker.lockmsg;
 	return pointer;
+end;
+
+function dtf.SupportedLocalesOf(locales)
+	return checker.supportedlocale('main', locales);
 end;
 
 dtf._private = {
