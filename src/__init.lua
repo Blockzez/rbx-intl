@@ -1,5 +1,5 @@
 --[=[
-	Version 2.3.0
+	Version 2.3.1
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
