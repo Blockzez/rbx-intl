@@ -166,13 +166,13 @@ local function deepcopymerge(t0, t1)
 	if t0 then
 		for k, v in next, t0 do
 			if type(v) == "table" and setinherit[v] ~= 0 then
-				copy[k] = deepcopymerge(v, nil);
+				copy[k] = deepcopymerge(v);
 			else
 				copy[k] = v;
 			end;
 		end;
 	elseif t1 then
-		return deepcopymerge(t1, nil);
+		return deepcopymerge(t1);
 	else
 		return nil;
 	end;
@@ -185,8 +185,10 @@ local function deepcopymerge(t0, t1)
 					else
 						copy[k] = deepcopymerge(t0[k], v);
 					end;
+				elseif Alias.isAlias(t0[k]) then
+					copy[k] = Alias.new(t0[k], v);
 				else
-					copy[k] = deepcopymerge(v, nil);
+					copy[k] = deepcopymerge(v);
 				end;
 			else
 				copy[k] = v;
@@ -234,6 +236,17 @@ function d.getdata(ttype, locale)
 	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
 	local ms = resolve_alias(deepcopymerge(rawgetdata(ttype, d.negotiateparent(minimized)) or rawgetdata(ttype, d.negotiateparent(maximized)), 
 		requireifnotnil(commons[ttype]:FindFirstChild(minimized)) or requireifnotnil(commons[ttype]:FindFirstChild(maximized))));
+	
+	-- Merge calendar
+	if ms and ms.dates and ms.dates.calendars then
+		local cals = ms.dates.calendars;
+		local gregorian = cals.gregorian;
+		for cal, ref in next, cals do
+			if cal ~= "gregorian" and cal ~= "generic" then
+				cals[cal] = deepcopymerge(gregorian, ref);
+			end;
+		end;
+	end;
 	
 	table.insert(_cache.data, 1, ms or false);
 	table.insert(_cache.locale, 1, ttype .. '/' .. locale);
