@@ -270,7 +270,7 @@ function c.options(ttype, locales, options)
 		end;
 		if ret.style == "unit" or (ret.style == "currency" and ret.currencyDisplay == "name") then
 			if ret.style == "unit" then
-				local availableUnits = data.unit[ret.unitDisplay];
+				local availableUnits = data.units[ret.unitDisplay];
 				ret.unitPattern = availableUnits[ret.unit];
 				if not ret.unitPattern then
 					local unit0, unit1 = unpack(ret.unit:split('-per-'));
