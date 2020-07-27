@@ -60,7 +60,7 @@ local valid_value_property =
 	["nu/signDisplay"] = { "auto", "never", "always", "exceptZero" },
 	["nu/style"] = { "decimal", "currency", "percent", "unit" },
 	["nu/unitDisplay"] = "%display1",
-	["nu/useGrouping"] = { "min2", "auto", "always", "never" },
+	["nu/useGrouping"] = { "min2", "auto", "always", "never", "thousands" },
 	["nu/minimumIntegerDigits"] = "f/1..",
 	["nu/maximumIntegerDigits"] = "f/minimumIntegerDigits..inf",
 	["nu/minimumFractionDigits"] = "f/0..",
@@ -149,15 +149,15 @@ function c.negotiatelocale(ttype, locales)
 	else
 		error("Incorrect locale information provided", 3);
 	end;
-	for _, locale in next, locales do
+	for _, locale in ipairs(locales) do
 		if type(locale) ~= "string" and (not Locale._private.intl_proxy[locale]) and locale ~= nil then
 			error("Language ID should be string or Locale", 3);
 		end;
 		locale = Locale._private.intl_proxy[locale] and locale or Locale.new(locale);
-		if localedata.exists(ttype, locale) then
+		if (not data) and localedata.exists(ttype, locale) then
 			data = localedata.getdata(ttype, locale);
 			locales = locale;
-			break;
+			-- The reason why it didn't break to ensure the others are also a valid locale identifier
 		end;
 	end;
 	if not data then
@@ -187,7 +187,7 @@ function c.supportedlocale(ttype, locales)
 	error("Incorrect locale information provided", 3);
 end;
 
-local calendar_alias = { gregory = "gregorian", japanese = "japanese", buddhist = "buddhist", roc = "roc", islamic = "islamic" };
+local calendar_alias = { gregory = "gregorian", japanese = "japanese", buddhist = "buddhist", roc = "roc", islamic = "islamic", chinese = "chinese" };
 local granularity_alias = { grapheme = "GraphemeClusterBreak", word = "WordBreak", sentence = "SentenceBreak" };
 
 local function rules_lt(v0, v1)
@@ -254,7 +254,7 @@ function c.options(ttype, locales, options)
 		
 		local numbers = data.numbers;
 		ret.symbols = c.negotiate_numbering_system(numbers.symbols, ret.numberingSystem, numbers.defaultNumberingSystem);
-		ret.minimumGroupingDigits = (ret.useGrouping == "min2" and 2) or (ret.useGrouping == "always" and 1) or (ret.useGrouping == "never" and 0) or numbers.minimumGroupingDigits;
+		ret.minimumGroupingDigits = ((ret.useGrouping == "always" or ret.useGrouping == "thousands") and 1) or math.max(ret.useGrouping == "min2" and 2 or 1, numbers.minimumGroupingDigits);
 		
 		local decimalPattern = c.negotiate_numbering_system(numbers.formats[(ret.style == "percent" and ret.notation ~= "compact") and 'percent' or 'decimal'], ret.numberingSystem, numbers.defaultNumberingSystem);
 		if ret.style == "currency" and (ret.currencyDisplay ~= "name") then
@@ -366,8 +366,9 @@ function c.options(ttype, locales, options)
 			end;
 			ret.rules = { };
 			for k, v in next, d.segmentRules do
-				table.insert(ret.rules, { k, (v:gsub('%$[%a_]+', ret.variables)) })
+				table.insert(ret.rules, { k, (v:gsub('%$[%a_]+', ret.variables)) });
 			end;
+			table.sort(ret.rules, rules_lt);
 			local suppressions = d.suppressions and d.suppressions[ret.suppression];
 			if suppressions then
 				ret.suppressions = table.move(suppressions, 1, #suppressions, 1, table.create(#suppressions));
@@ -554,12 +555,6 @@ end;
 local spaces = { utf8.char(0x0020), utf8.char(0x00A0), utf8.char(0x1680), utf8.char(0x180E), utf8.char(0x2000), utf8.char(0x2001), utf8.char(0x2002), utf8.char(0x2003), 
 	utf8.char(0x2004), utf8.char(0x2005), utf8.char(0x2006), utf8.char(0x2007), utf8.char(0x2008), utf8.char(0x2009), utf8.char(0x200A), utf8.char(0x200B), utf8.char(0x202F), utf8.char(0x205F), utf8.char(0x3000), utf8.char(0xFEFF) };
 
-function c.tospace(value)
-	for _, v in ipairs(spaces) do
-		value = value:gsub(v, ' ');
-	end;
-	return value;
-end;
 function c.spacestoparts(value)
 	local left, right;
 	for _, v in ipairs(spaces) do
@@ -678,10 +673,8 @@ function c.raw_format(val, minintg, maxintg, minfrac, maxfrac, rounding)
 	else
 		intg, frac = val:match("^(%d*)%.?(%d*)$");
 	end;
-	intg = intg:gsub('^0+', '');
-	frac = frac:gsub('0+$', '');
-	local intglen = #intg;
-	local fraclen = #frac;
+	intg, frac = intg:gsub('^0+', ''), frac:gsub('0+$', '');
+	local intglen, fraclen = #intg, #frac;
 	if minintg and (intglen < minintg) then
 		intg = ('0'):rep(minintg - intglen) .. intg;
 	end;
@@ -697,14 +690,15 @@ function c.raw_format(val, minintg, maxintg, minfrac, maxfrac, rounding)
 	return intg .. '.' .. frac;
 end;
 function c.raw_format_sig(val, min, max, rounding)
-	local intg, frac;
+	local intg, frac = val:match("^(%d*)%.?(%d*)$");
+	intg, frac = intg:gsub('^0+', ''), frac:gsub('0+$', '');
+	intg = intg == '' and '0' or intg;
 	if max and max ~= math.huge then
+		val = intg .. '.' .. frac;
 		intg, frac = quantize(val, max - ((val:find('%.') or (#val + 1)) - 1), rounding);
-	else
-		intg, frac = val:match("^(%d*)%.?(%d*)$");
+		intg, frac = intg:gsub('^0+', ''), frac:gsub('0+$', '');
+		intg = intg == '' and '0' or intg;
 	end;
-	intg = intg:gsub('^0+', '');
-	frac = frac:gsub('0+$', '');
 	if min then
 		min = math.max(min - #val:gsub('%.%d*$', ''), 0);
 		if #frac < min then
