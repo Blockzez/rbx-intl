@@ -12,6 +12,23 @@ local properties = data.properties;
 
 local propertyNames = { 'Emoji' };
 
+local function getproperty(name, c)
+	for i = 0, 1 do
+		if i > 0 or name then
+			for t, v0 in next, properties[i == 0 and name or propertyNames[i]] do
+				for _, v1 in ipairs(v0) do
+					if type(v1) == "table" and (c >= v1[1] and c <= v1[2]) or v1 == c then
+						return t;
+					end;
+				end;
+			end;
+		end;
+	end;
+	return 'Other';
+end;
+
+--print(getproperty('Word_Break', utf8.codepoint('ฆัง')));
+
 local function isproperty(name, c, prop)
 	if c then
 		for i = 0, 1 do
@@ -29,7 +46,8 @@ local function isproperty(name, c, prop)
 	return false;
 end;
 
-local dict_len = math.max(dictionaries.CJ.max_length, dictionaries.Thai.max_length);
+local dict_len = math.max(dictionaries.CJ.max_length, dictionaries.Thai.max_length,
+	dictionaries.Khmer.max_length, dictionaries.Lao.max_length, dictionaries.Burmese.max_length);
 local function iter(self, text)
 	local i, codes = 0, { };
 	for i, v in utf8.codes(text) do
@@ -42,7 +60,7 @@ local function iter(self, text)
 		
 		while no_break do
 			i = i + 1;
-			local sentence_suppressed = false;
+			local suppressed = false;
 			if codes[i] then
 				table.insert(ret, utf8.char(codes[i]));
 				-- Suppressions of sentence
@@ -55,7 +73,7 @@ local function iter(self, text)
 							end;
 							check = check .. utf8.char(codes[i + i1]);
 							if check == sup_txt then
-								sentence_suppressed = true;
+								suppressed = true;
 								table.insert(ret, check);
 								i = i + i1 + 1;
 								table.insert(ret, utf8.char(codes[i]));
@@ -63,8 +81,13 @@ local function iter(self, text)
 							end;
 						end;
 					end;
+				elseif self.granularity == "word" then
+					-- Don't break before format (expect after line break)
+					if not (isproperty('Word_Break', codes[i], 'Newline') or isproperty('Word_Break', codes[i], 'CR') or isproperty('Word_Break', codes[i], 'LF')) and (isproperty('Word_Break', codes[i + 1], 'Format') or isproperty('Word_Break', codes[i + 1], 'Extend')) then
+						suppressed = true;
+					end;
 				end;
-				if not sentence_suppressed then
+				if not suppressed then
 					local match, boundary = false, false;
 					for i1, tkn in ipairs(self.ruletoken) do
 						local tkn_match, tkn_boundary = tkn(codes, i);
@@ -86,7 +109,7 @@ local function iter(self, text)
 				-- Break CJ and Thai words via dictionary
 				-- This is trickter then I thought
 				-- TODO: Only include this for CJK, Thai, Khmer, Burmese and Lao character
-				if (not no_break) and self.granularity == "word" then
+				if (not no_break) and self.granularity == "word" and #ret <= dict_len then
 					local highest_i, freq, rcount = 0, 0, 0;
 					for i1 = 1, dict_len do
 						if not codes[i + i1] then
@@ -181,23 +204,27 @@ local function tokenize(id, rule)
 			end;
 			return true, no_of_r % 2 == 0;
 		end;
+	elseif id == "WB4" then
+		--  Ignore Format and Extend characters, except after sot, CR, LF, and Newline. (See Section 6.2, Replacing Ignore Rules.) This also has the effect of: Any × (Format | Extend)
+		return function(codes, i)
+			return (isproperty('Word_Break', codes[i - 1], 'Newline') or isproperty('Word_Break', codes[i - 1], 'CR') or isproperty('Word_Break', codes[i - 1], 'LF')) and (isproperty('Word_Break', codes[i], 'Format') or isproperty('Word_Break', codes[i], 'Extend')), false;
+		end;
 	elseif id == "WB6" then
 		return function(codes, i)
-			return isproperty('Sentence_Break', codes[i], 'ALetter') and isproperty('Sentence_Break', codes[i + 2], 'ALetter')
-				and isproperty('Sentence_Break', codes[i + 1], 'MidLetter') and isproperty('Sentence_Break', codes[i + 1], 'MidNumLet'), false;
+			return isproperty('Word_Break', codes[i], 'ALetter') and isproperty('Word_Break', codes[i + 2], 'ALetter')
+				and isproperty('Word_Break', codes[i + 1], 'MidLetter') and isproperty('Word_Break', codes[i + 1], 'MidNumLet'), false;
 		end;
 	elseif id == "WB7" then
 		return function(codes, i)
-			return isproperty("Sentence_Break", codes[i - 1], 'ALetter') and  isproperty("Sentence_Break", codes[i + 1], 'ALetter')
-				and isproperty('Sentence_Break', codes[i], 'MidLetter') and isproperty('Sentence_Break', codes[i], 'MidNumLet'), false;
+			return isproperty("Word_Break", codes[i - 1], 'ALetter') and  isproperty("Word_Break", codes[i + 1], 'ALetter')
+				and isproperty('Word_Break', codes[i], 'MidLetter') and isproperty('Word_Break', codes[i], 'MidNumLet'), false;
 		end;
 	elseif id == "WB11" then
 		-- Do not break within sequences, such as “3.2” or “3,456.789”.
 		return function(codes, i)
-			if isproperty('Sentence_Break', codes[i], 'MidNum') or isproperty('Sentence_Break', codes[i], 'MidNumLetQ') then
-				if isproperty('Sentence_Break', codes[i - 1], 'Numeric') and isproperty('Sentence_Break', codes[i + 1], 'Numeric') then
-					return true, false;
-				end;
+			if (isproperty('Word_Break', codes[i], 'MidNum') or isproperty('Word_Break', codes[i], 'MidNumLetQ'))
+				and (isproperty('Word_Break', codes[i - 1], 'Numeric') and isproperty('Word_Break', codes[i + 1], 'Numeric')) then
+				return true, false;
 			end;
 			return false, false;
 		end;
@@ -347,13 +374,15 @@ local granularity_to_id = {
 
 function sg.new(...)
 	local option = checker.options('sg', ...);
-	-- https://unicode.org/reports/tr29/#Grapheme_Cluster_Break_Property_Values
-	-- https://www.unicode.org/reports/tr18/
 	
 	option.ruletoken = { };
-	for k, v in ipairs(option.rules) do
+	for _, v in ipairs(option.rules) do
 		table.insert(option.ruletoken, tokenize(granularity_to_id[option.granularity] .. v[1], v[2]));
-	end
+	end;
+	-- Rule: Don't break between extender
+	if option.granularity == "word" then
+		table.insert(option.ruletoken, tokenize(nil, '×($Extend|$ZWJ)'));
+	end;
 	
 	local pointer = newproxy(true);
 	local pointer_mt = getmetatable(pointer);
