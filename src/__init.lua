@@ -1,5 +1,5 @@
 --[=[
-	Version 2.3.1
+	Version 2.4.0
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -30,6 +30,7 @@ local private = { };
 local modules = { };
 
 local checker = require(script:WaitForChild("_checker"));
+local localedata = require(script:WaitForChild("_localedata"));
 
 local function r(name)
 	local module_table = require(script:WaitForChild(name));
@@ -212,10 +213,187 @@ function modules.toLocaleTimeString(...)
 	return private.DateTimeFormat.format(option, false, (...));
 end;
 
+--
+local function concat_utf8(self)
+	for i, v in ipairs(self) do
+		self[i] = utf8.char(v);
+	end;
+	return table.concat(self);
+end;
+
+local function code_utf8(self)
+	local ret = { };
+	for _, c in utf8.codes(self) do
+		table.insert(ret, c);
+	end;
+	return ret;
+end;
+
+local casing = localedata.casing;
+
+local function replace(copy, self, old, new, max, i, j)
+	old, new = type(old) == "table" and old or { old }, type(new) == "table" and new or { new };
+	local ret = copy and table.move(self, 1, #self, 1, table.create(#self)) or self;
+	local i0 = i and (i - 1) or 0;
+	local count = 0;
+	while i0 do
+		i0 = table.find(ret, old[1], i0 + 1);
+		if i0 then
+			if j and (i0 > j) then
+				break;
+			end;
+			local match = true;
+			if type(old) == "table" then
+				for i1, v in ipairs(old) do
+					if ret[i0 + i1 - 1] ~= v then
+						match = false;
+						break;
+					end;
+				end;
+			end;
+			if match then
+				local repl_len = math.min(#new, #old);
+				for i1 = 0, repl_len - 1 do
+					ret[i0 + i1] = new[i1 + 1];
+				end;
+				local i1 = i0 + repl_len;
+				if #old > #new then
+					for i2 = 1, (#old - #new) do
+						table.remove(ret, i1);
+					end;
+				elseif #new > #old then
+					for i2 = 1, (#new - #old) do
+						table.insert(ret, i1 + i2 - 1, new[repl_len + i2]);
+					end;
+				end;
+				count += 1;
+				if max and max > 0 and count >= max then
+					break;
+				end;
+			end;
+		end;
+	end;
+	return ret;
+end;
+
+local function is_latin(c)
+	return c and ((c >= 0x0041 and c <= 0x005A) or (c >= 0x0061 and c <= 0x007A) or (c == 0x00AA) or (c == 0x00BA) or (c >= 0x00C0 and c <= 0x00D6)
+		or (c >= 0x00D8 and c <= 0x00F6) or (c >= 0x00F8 and c <= 0x02B8) or (c >= 0x02E0 and c <= 0x02E4) or (c >= 0x1D00 and c <= 0x1D25)
+		or (c >= 0x1D2C and c <= 0x1D5C) or (c >= 0x1D62 and c <= 0x1D65) or (c >= 0x1D6B and c <= 0x1D77) or (c >= 0x1D79 and c <= 0x1DBE)
+		or (c >= 0x1E00 and c <= 0x1EFF) or (c == 0x2071) or (c == 0x207F) or (c >= 0x2090 and c <= 0x209C) or (c >= 0x212A and c <= 0x212B)
+		or (c == 0x2132) or (c == 0x214E) or (c >= 0x2160 and c <= 0x2188) or (c >= 0x2C60 and c <= 0x2C7F) or (c >= 0xA722 and c <= 0xA787)
+		or (c >= 0xA78B and c <= 0xA78E) or (c >= 0xA790 and c <= 0xA793) or (c >= 0xA7A0 and c <= 0xA7AA) or (c >= 0xA7F8 and c <= 0xA7FF)
+		or (c >= 0xFB00 and c <= 0xFB06) or (c >= 0xFF21 and c <= 0xFF3A) or (c >= 0xFF41 and c <= 0xFF5A));
+end;
+
+local function toupper(self)
+	for i, v in ipairs(self) do
+		self[i] = casing.caseMapping.upper[v] or v;
+	end;
+	for old_value, new_value in next, casing.specialCasing.upper do
+		replace(false, self, old_value, new_value);
+	end;
+	return concat_utf8(self);
+end;
+
+local whitespaces = { 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0, 0x1680, 0x2000, 0x2001,
+	0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000 };
+local function tolower(self)
+	for i, v in ipairs(self) do
+		-- Final form of sigma
+		if self[i] == 0x03A3 and is_latin(self[i - 1]) and ((not self[i + 1]) or table.find(whitespaces, self[i + 1])) then
+			self[i] = 0x03C2;
+		else
+			self[i] = casing.caseMapping.lower[v] or v;
+		end;
+	end;
+	for old_value, new_value in next, casing.specialCasing.lower do
+		replace(false, self, old_value, new_value);
+	end;
+	return concat_utf8(self);
+end
+
+function modules.toLocaleUpper(...)
+	if select('#', ...) == 0 then
+		error("missing argument #1", 2);
+	end;
+	
+	local value, locale = ...;
+	if type(value) ~= "string" and type(value) ~= "number" then
+		error("invalid argument #1 (string expected, got " .. typeof(value) .. ')');
+	end;
+	local language = checker.negotiatelocale('casing', locale):Minimize().language;
+	local self = code_utf8(value);
+	
+	-- Lithuanian
+	if language == "lt" then
+		-- Remove the dot after "i"
+		replace(false, self, { 0x0069, 0x0307 }, nil);
+	-- Turkish and Azeri
+	elseif language == 'tr' or language == "az" then
+		-- When uppercasing, i turns into a dotted capital I
+		replace(false, self, 0x0069, 0x0130);
+	end;
+	
+	return toupper(self);
+end;
+
+function modules.toLocaleLower(...)
+	if select('#', ...) == 0 then
+		error("missing argument #1", 2);
+	end;
+	
+	local value, locale = ...;
+	if type(value) ~= "string" and type(value) ~= "number" then
+		error("invalid argument #1 (string expected, got " .. typeof(value) .. ')');
+	end;
+	local language = checker.negotiatelocale('casing', locale):Minimize().language;
+	local self = code_utf8(value);
+	
+	-- Lithuanian
+	if language == 'lt' then
+		-- Introduce an explicit dot above when lowercasing capital I's and J's whenever there are more accents above.
+		for _, v in ipairs{ { 0x0049, 0x0069 }, { 0x004A, 0x006A }, { 0x012E, 0x012F } } do
+			local i0 = 0;
+			while i0 do
+				i0 = table.find(self, v[1], i0 + 1);
+				if i0 and casing.moreAbove[self[i0 + 1]] then
+					self[i0] = v[2];
+					table.insert(self, i0 + 1, 0x0307);
+				end;
+			end;
+		end;
+		
+		replace(false, self, 0x00CC, { 0x0069, 0x0307, 0x0300 });
+		replace(false, self, 0x00CD, { 0x0069, 0x0307, 0x0301 });
+		replace(false, self, 0x0128, { 0x0069, 0x0307, 0x0303 });
+	-- Turkish and Azeri
+	elseif language == 'tr' or language == "az" then
+		-- LATIN CAPITAL LETTER I WITH DOT ABOVE
+		replace(false, self, 0x0130, 0x0069);
+		
+		-- When lowercasing, unless an I is before a dot_above, it turns into a dotless i.
+		local i0 = 0;
+		while i0 do
+			i0 = table.find(self, 0x0049, i0 + 1);
+			if i0 and (self[i0 + 1] ~= 0x0307) then
+				self[i0] = 0x0131;
+			end;
+		end;
+		
+		-- Remove dot above with sequence i
+		replace(false, self, { 0x0049, 0x0307 }, 0x0049);
+	end;
+	
+	return tolower(self);
+end;
+
+--
+
 function modules.getCanonicalLocales(locales)
 	if type(locales) == "table" then
 		local ret = { };
-		for _, v in next, locales do
+		for _, v in next, ipairs(locales) do
 			if type(v) == "string" or private.Locale.intl_proxy[v] then
 				table.insert(ret, tostring(private.Locale.intl_proxy[locales] and locales or modules.Locale.new(locales)));
 			elseif v ~= nil then
