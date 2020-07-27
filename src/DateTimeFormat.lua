@@ -96,13 +96,71 @@ local function geterayearmonthdayhirji(days)
 	return 1, (cycle_number * 30) + year_in_cycle, month, ((day_of_year - (days_in_months_hiriji[month] or 0)) + 1);
 end;
 
+-- Algorithmn: Chinese - Only supports 1901 to 2100
+
+-- Starting at 1900
+local year_info_chinese = { 19416, 19168, 42352, 21717, 53856, 55632, 91476, 22176, 39632, 21970, 19168, 42422, 42192, 53840, 119381, 46400, 54944, 44450, 38320, 84343, 18800, 42160, 46261, 27216, 27968, 109396, 11104, 38256, 21234,
+	18800, 25958, 54432, 59984, 28309, 23248, 11104, 100067, 37600, 116951, 51536, 54432, 120998, 46416, 22176, 107956, 9680, 37584, 53938, 43344, 46423, 27808, 46416, 86869, 19872, 42448, 83315, 21200, 43432, 59728,
+	27296, 44710, 43856, 19296, 43748, 42352, 21088, 62051, 55632, 23383, 22176, 38608, 19925, 19152, 42192, 54484, 53840, 54616, 46400, 46496, 103846, 38320, 18864, 43380, 42160, 45690, 27216, 27968, 44870, 43872,
+	38256, 19189, 18800, 25776, 29859, 59984, 27480, 23232, 43872, 38613, 37600, 51552, 55636, 54432, 55888, 30034, 22176, 43959, 9680, 37584, 51893, 43344, 46240, 47780, 44368, 21977, 19360, 42416, 86390, 21168, 43312,
+	31060, 27296, 44368, 23378, 19296, 42726, 42208, 53856, 60005, 54576, 23200, 30371, 38608, 19195, 19152, 42192, 118966, 53840, 54560, 56645, 46496, 22224, 21938, 18864, 42359, 42160, 43600, 111189, 27936, 44448, 84835,
+	37744, 18936, 18800, 25776, 92326, 59984, 27296, 108228, 43744, 37600, 53987, 51552, 54615, 54432, 55888, 23893, 22176, 42704, 21972, 21200, 43448, 43344, 46240, 46758, 44368, 21920, 43940, 42416, 21168, 45683, 26928,
+	29495, 27296, 44368, 84821, 19296, 42352, 21732, 53600, 59752, 54560, 55968, 92838, 22224, 19168, 43476, 41680, 53584, 62034 };
+
+local days_in_year_chinese = { 384, 354, 355, 383, 354, 355, 384, 354, 355, 384, 354, 384, 354, 354, 384, 354, 355, 384, 355, 384, 354, 354, 384, 354, 354, 385, 354, 355, 384, 354, 383, 354, 355, 384, 355, 354, 384, 354, 384,
+	354, 354, 384, 355, 354, 385, 354, 354, 384, 354, 384, 354, 355, 384, 354, 355, 384, 354, 383, 355, 354, 384, 355, 354, 384, 355, 353, 384, 355, 384, 354, 355, 384, 354, 354, 384, 354, 384, 354, 355, 384, 355, 354, 384,
+	354, 384, 354, 354, 384, 355, 355, 384, 354, 354, 383, 355, 384, 354, 355, 384, 354, 354, 384, 354, 355, 384, 354, 385, 354, 354, 384, 354, 354, 384, 355, 384, 354, 355, 384, 354, 354, 384, 354, 355, 384, 354, 384, 354,
+	354, 384, 355, 354, 384, 355, 384, 354, 354, 384, 354, 354, 384, 355, 355, 384, 354, 384, 354, 354, 384, 354, 355, 384, 355, 384, 354, 354, 383, 355, 354, 384, 355, 354, 384, 354, 384, 354, 355, 384, 354, 355, 384, 354,
+	384, 354, 354, 384, 355, 354, 384, 355, 354, 384, 354, 384, 354, 355, 384, 354, 355, 383, 354, 384, 354, 355, 384, 355, 354, 384, 354, 354, 384 };
+
+local function calculatemonthday(year_info, days)
+	local months = { {1, false}, {2, false}, {3, false}, {4, false}, {5, false}, {6, false}, {7, false}, {8, false}, {9, false}, {10, false}, {11, false}, {12, false} };
+	local leap_month = year_info % 16;
+	if leap_month > 0 then
+		table.insert(months, leap_month + 1, { leap_month, true });
+	end;
+	local month = 12;
+	local is_leap_month = false;
+	for i, v in ipairs(months) do
+		local d = bit32.rshift(year_info, 16 - (v[2] and 0 or v[1])) % 2 + 29;
+		if days < d then
+			month = v[1];
+			is_leap_month = v[2];
+			break;
+		end;
+		days = days - d;
+	end;
+	return month, days + 1, is_leap_month;
+end;
+
+local function geterayearmonthdaychinese(days)
+	-- 31 January 1900
+	days = days - 693625;
+	if days < 0 or days > 73057 then
+		error("Chinese calendar doesn't support years under 1900 or over 2100 (in Chinese calendar)", 6);
+	end;
+	
+	local r = #year_info_chinese;
+	for i, d in ipairs(days_in_year_chinese) do
+		if days < d then
+			r = i;
+			break;
+		end;
+		days = days - d;
+	end;
+	
+	return 1, 1899 + r, calculatemonthday(year_info_chinese[r], days);
+end;
+
 -- Algorithmn: Solar calendars
 local caldata = localedata.supplemental.calendarData;
 local function geterayearmonthday(cal, year, month, day)
 	if not caldata[cal] then
-		return (year < 1 and '0' or '1'), year, month, day;
+		return (year < 1 and 1 or 2), year, month, day;
 	elseif cal == "islamic" then
 		return geterayearmonthdayhirji(from_date(year, month, day));
+	elseif cal == "chinese" then
+		return geterayearmonthdaychinese(from_date(year, month, day));
 	end;
 	for c = #caldata[cal].eras, 1, -1 do
 		local era = caldata[cal].eras[c];
@@ -119,9 +177,8 @@ local function zero_pad_substitute(value, length, nu)
 	-- Just a sugar syntax
 	return checker.substitute(('%0' .. length .. 'd'):format(value), nu);
 end;
-local dayperiods = localedata.supplemental.dayPeriods;
 local function get_dayperiod(data, flexible)
-	local data1 = data.self.dayPeriodRule;
+	local data1 = data.dayPeriodRule;
 	if data1 then
 		for k, v in next, data1 do
 			if flexible == (not v._from) then
@@ -165,6 +222,9 @@ local getvalue =
 				return zero_pad_substitute(date.year % 100, 2);
 			end;
 			return zero_pad_substitute(date.year, n, self.numberingSystem);
+		end;
+		U = function(self, date, n)
+			return self.data.cyclicNameSets.years.format[n == 5 and 'narrow' or (n == 4 and 'wide' or 'abbreviated')][(date.year % 60) - 3];
 		end;
 		Q = function(self, date, n)
 			if n >= 3 then
@@ -297,12 +357,12 @@ local function find_closet_flexible(v0, available)
 	if closest then
 		return closest;
 	end;
-	return;
+	return nil;
 end;
 
 local hourcycle_alias = { h12 = 'h', h23 = 'H', h11 = 'K', h24 = 'k', };
 
-local char_pattern_flexible_find = { { 'G', 'y', 'M', 'd', 'E' }, { 'E', 'H', 'm', 's' } };
+local char_pattern_flexible_find = { { 'G', 'y', 'M', 'E', 'd' }, { 'E', 'H', 'm', 's' } };
 local flexible_find_size = { ['numeric'] = 1, ['2-digit'] = 2, ['long'] = 4, ['short'] = 3, ['narrow'] = 5 };
 local smallest_diff_char = { { 'second', 's' }, { 'minute', 'm' }, { 'hour', 'H' }, { 'day', 'd' }, { 'month', 'M' }, { 'year', 'y' }, { 'era', 'G' } };
 
@@ -324,8 +384,8 @@ local function find_format(self, range)
 	
 	local date_flexible_find = '';
 	if not self.dateStyle then
-		for i, v in ipairs { self.era or false, self.year or false, self.month or false, self.day or false, self.weekday or false } do
-			if v and (i ~= 5 or date_flexible_find ~= '') then
+		for i, v in ipairs { self.era or false, self.year or false, self.month or false, self.weekday or false, self.day or false } do
+			if v and (i ~= 4 or date_flexible_find ~= '') then
 				date_flexible_find = date_flexible_find .. char_pattern_flexible_find[1][i]:rep(flexible_find_size[v]);
 			end;
 		end;
@@ -448,6 +508,8 @@ local function format_pattern(self, start, pattern, parts, info0, info1, source_
 	return ret;
 end;
 
+local days_in_month_gregorian = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+
 local function format(self, parts, date0, date1)
 	if type(date0) == "number" then
 		date0 = os.date('!*t', date0);
@@ -463,7 +525,7 @@ local function format(self, parts, date0, date1)
 	elseif typeof(date1) == "DateTime" then
 		date1 = date1:ToUniversalTime();
 	elseif date1 ~= nil and (typeof(date1) ~= "userdata" or getmetatable(date0) == nil) and type(date1) ~= "table" then
-		error("invalid argument #2 (date expected, got " .. typeof(date1) .. ')', 4);
+		error("invalid argument #3 (date expected, got " .. typeof(date1) .. ')', 4);
 	end;
 	
 	local range = false;
@@ -472,10 +534,18 @@ local function format(self, parts, date0, date1)
 	end;
 	
 	local rawyear0, rawmonth0, rawday0 = date0.Year or date0.year, date0.Month or date0.month or 1, date0.Day or date0.day or 1;
-	local rawyear1, rawmonth1, rawday1;
+	-- Check if the date is valid
+	if (rawmonth0 < 1 or rawmonth0 > 12) or (rawday0 < 1 or rawday0 > ((rawmonth0 == 2 and is_leap(rawyear0)) and 29 or days_in_month_gregorian[rawmonth0])) then
+		error("argument #2 cannot be represented as a date", 4);
+	end;
 	
+	local rawyear1, rawmonth1, rawday1;
 	if date1 then
 		rawyear1, rawmonth1, rawday1 = date1.Year or date1.year, date1.Month or date1.month or 1, date1.Day or date1.day or 1;
+		-- Check if the date is valid
+		if (rawmonth1 < 1 or rawmonth1 > 12) or (rawday1 < 1 or rawday1 > ((rawmonth1 == 2 and is_leap(rawyear1)) and 29 or days_in_month_gregorian[rawmonth1])) then
+			error("argument #3 cannot be represented as a date", 4);
+		end;
 	end;
 	
 	local era0, year0, month0, day0, weekday0 = geterayearmonthday(self.calendar, rawyear0, rawmonth0, rawday0);
