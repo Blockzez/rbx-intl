@@ -108,8 +108,7 @@ function format(self, parts, value0, value1)
 			local minfrac, maxfrac = self.minimumFractionDigits, self.maximumFractionDigits;
 			if self.notation == "compact" then
 				--[=[ Compact decimal formatting ]=]--
-				-- The sizes of the value in different plurals rules shouldn't be different
-				-- If there is, that would one tricky code to deal with.
+				-- The rounding is one tricky code to deal with
 				if self.isSignificant then
 					rawvalue = negt .. checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
@@ -117,24 +116,43 @@ function format(self, parts, value0, value1)
 				end;
 				post = post:gsub('^0+$', '');
 				local intlen = #post:gsub('%..*', '') - 3;
+				local compact_val = post;
 				-- Just in case, that pattern is '0'
+				-- Why max math.min 12? because 12 is the highest compact value CLDR supported (trillion)
+				-- But if this changes, I might use #self.compactPattern.other
 				if self.compactPattern.other[math.min(intlen, 12)] then
-					post = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
-					intlen = math.min(intlen, 12);
+					compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
 				-- The '0' pattern indicates no compact number available
 				elseif (self.style == "currency" and (self.currencyDisplay ~= "name")) or self.style == "percent" then
 					standardPattern = self.standardNPattern;
 				end;
 				if not (minfrac or maxfrac) then
-					maxfrac = ((#post:gsub('%.%d*$', '') < 2) and 1 or 0);
+					maxfrac = ((#compact_val:gsub('%.%d*$', '') < 2) and 1 or 0);
 				end;
 				
+				local formatted_compact_val;
 				if self.isSignificant then
-					post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					formatted_compact_val = checker.raw_format_sig(compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
-					post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					formatted_compact_val = checker.raw_format(compact_val, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
 				
+				-- Check if 9's are rounded through 10 via length, remove decimals
+				if #formatted_compact_val:gsub("%.%d*$", '') == #compact_val:gsub("%.%d*$", '') then
+					post = formatted_compact_val;
+				else
+					intlen = intlen + 1;
+					if self.compactPattern.other[math.min(intlen, 12)] then
+						compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0) - 1);
+					end;
+					if self.isSignificant then
+						post = checker.raw_format_sig(compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					else
+						post = checker.raw_format(compact_val, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					end;
+				end;
+				
+				intlen = math.min(intlen, 12);
 				if self.compactPattern.other[intlen] then
 					selectedPattern = checker.negotiate_plural_table(self.compactPattern, self.pluralRule, post)[intlen];
 				end;
@@ -182,8 +200,8 @@ function format(self, parts, value0, value1)
 		elseif self.notation == "standard" or self.notation == "compact" then
 			--[=[ Standard formatting ]=]--
 			local intg, frac = post:match("^(%d*)%.?(%d*)$");
-			local gs = (self.standardNPattern or standardPattern).metadata.integerGroupSize;
-			if (self.minimumGroupingDigits > 0) and (gs) and (#intg >= gs[1] + self.minimumGroupingDigits) then
+			local gs = self.useGrouping == "thousands" and { 3, 3 } or (self.useGrouping ~= "never" and (self.standardNPattern or standardPattern).metadata.integerGroupSize);
+			if gs and (#intg >= gs[1] + self.minimumGroupingDigits) then
 				local sym = ((self.style == "currency" and self.symbols.currencyGroup) or self.symbols.group);
 				if parts or (sym:match("[%%%d]")) then
 					local ret, rem;
@@ -202,11 +220,11 @@ function format(self, parts, value0, value1)
 					table.remove(ret, 1);
 					intg = ret;
 				elseif gs[1] == gs[2] then
-					intg = checker.substitute(intg:reverse():gsub(('%d'):rep(gs[1]), "%1" .. sym:reverse()):reverse():match("^%D*(.*)$"), self.numberingSystem);
+					intg = checker.substitute(intg:reverse():gsub(('%d'):rep(gs[1]), "%1" .. sym:reverse(), (#intg - 1) / gs[1]):reverse(), self.numberingSystem);
 				else
 					local ret, rem = intg:reverse():match(("^(%s)(.+)$"):format(("%d"):rep(gs[1])));
 					intg = checker.initializestringbuilder{
-						checker.substitute(rem:gsub(('%d'):rep(gs[2]), "%1" .. sym:reverse()):reverse():match("^%D*(.*)$"), self.numberingSystem),
+						checker.substitute(rem:gsub(('%d'):rep(gs[2]), "%1" .. sym:reverse(), (#rem - 1) / gs[2]):reverse(), self.numberingSystem),
 						sym, checker.substitute(ret:reverse(), self.numberingSystem)
 					};
 				end;
@@ -239,11 +257,13 @@ function format(self, parts, value0, value1)
 					table.remove(post, 2);
 				end;
 			else
-				post = checker.substitute(intg, self.numberingSystem)
-					.. (frac == '' and '' or ((self.style == "currency" and self.symbols.currencyDecimal) or self.symbols.decimal))
-					.. (frac == '' and '' or checker.substitute(frac, self.numberingSystem))
-					.. self.symbols.exponential
-					.. checker.substitute(expt, self.numberingSystem);
+				post = checker.initializestringbuilder{
+					checker.substitute(intg, self.numberingSystem),
+					(frac == '' and '' or ((self.style == "currency" and self.symbols.currencyDecimal) or self.symbols.decimal)),
+					(frac == '' and '' or checker.substitute(frac, self.numberingSystem)),
+					self.symbols.exponential,
+					checker.substitute(expt, self.numberingSystem)
+				}
 			end;
 		end;
 		
@@ -275,11 +295,11 @@ function format(self, parts, value0, value1)
 			ret0 = standard;
 		else
 			ret1 = standard;
-		end
+		end;
 	end;
 	
 	--[=[ Unit ]=]--
-	local ret = range and (parts and checker.formattoparts(nil, checker.initializepart(), self.rangePattern, 'shared', ret0, ret1)
+	local ret = ret1 and (parts and checker.formattoparts(nil, checker.initializepart(), self.rangePattern, 'shared', ret0, ret1)
 			or self.rangePattern:gsub('{0}', table.concat(ret0)):gsub('{1}', table.concat(ret1)))
 		or (parts and ret0 or table.concat(ret0));
 	if self.style ~= "unit" and (self.style ~= "currency" or self.currencyDisplay ~= "name") then
