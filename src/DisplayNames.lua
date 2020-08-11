@@ -32,7 +32,7 @@ local function checkvalid(code, type)
 end;
 
 local function parselangugage(displaynames, pattern, code, style, fallback)
-	local language, script, region, variant = localedata.getlocaleparts(code);
+	local language, script, region, variants = localedata.getlocaleparts(code);
 	if not language then
 		error("'" .. code .. "' is not a valid locale identifier", 5);
 	end;
@@ -62,15 +62,22 @@ local function parselangugage(displaynames, pattern, code, style, fallback)
 			return nil;
 		elseif region and not displaynames.territories[region] then
 			return nil;
-		elseif variant and not displaynames.variants[variant] then
-			return nil;
 		end;
 	end;
 	local pattern1;
 	for _, v in ipairs {
 			negotiate_table(displaynames.scripts, script, style) or (fallback and script) or false,
-			negotiate_table(displaynames.territories, region, style) or (fallback and region) or false,
-			negotiate_table(displaynames.variants, variant, style) or (fallback and variant) or false } do
+			negotiate_table(displaynames.territories, region, style) or (fallback and region) or false } do
+		if v then
+			if pattern1 then
+				pattern1 = pattern.localeSeparator:gsub('{0}', pattern1):gsub('{1}', v);
+			else
+				pattern1 = v;
+			end;
+		end;
+	end;
+	for _, v in ipairs(variants) do
+		v = negotiate_table(displaynames.variants, v:upper(), style) or (fallback and v);
 		if v then
 			if pattern1 then
 				pattern1 = pattern.localeSeparator:gsub('{0}', pattern1):gsub('{1}', v);
