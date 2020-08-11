@@ -57,31 +57,31 @@ local function format_pattern(self, start, value, pattern, negt, compact, source
 		elseif v == 5 then
 			ret = checker.addpart(ret, 'perMille', self.symbols.perMille, source);
 		elseif v == 6 then
-			local symbol = (self.currencyData and ((self.currencyDisplay == "narrowSymbol" and self.currencyData['symbol-alt-narrow'])
-				or (self.currencyDisplay == "symbol" and self.currencyData.symbol)))
-				or (self.currency or '¤');
-			-- Not sure how currency spacing works, apologies but I'm going to assume, currency match is "[:^S:]" and surrounding match is "[:digit:]"
-			-- If anyone can tell me how the pattern works, please tell me.
-			if (pattern[i + 1] == 0) and symbol:match("%a$") then
-				symbol = symbol .. (self.currencySpacing and self.currencySpacing.afterCurrency.insertBetween or " ");
-			end;
-			if (pattern[i - 1] == 0) and symbol:match("^%a") then
-				symbol = (self.currencySpacing and self.currencySpacing.beforeCurrency.insertBetween or " ") .. symbol;
-			end;
-			ret = checker.addpart(ret, "currency", symbol, source);
-		else
-			if compact then
-				if type(ret) == "string" then
-					ret = ret .. v;
-				else
-					local prefix, compact, suffix = checker.spacestoparts(v);
-					ret = checker.addpart(ret, "literal", prefix, source);
-					ret = checker.addpart(ret, "compact", compact, source);
-					ret = checker.addpart(ret, "literal", suffix, source);
+			if self.currencyDisplay ~= "hidden" then
+				local symbol = (self.currencyData and ((self.currencyDisplay == "narrowSymbol" and self.currencyData['symbol-alt-narrow'])
+					or (self.currencyDisplay == "symbol" and self.currencyData.symbol)))
+					or (self.currency or '¤');
+				-- Not sure how currency spacing works, apologies but I'm going to assume, currency match is "[:^S:]" and surrounding match is "[:digit:]"
+				-- If anyone can tell me how the pattern works, please tell me.
+				if (pattern[i + 1] == 0) and symbol:match("%a$") then
+					symbol = symbol .. (self.currencySpacing and self.currencySpacing.afterCurrency.insertBetween or " ");
 				end;
-			else
-				ret = checker.addpart(ret, "literal", v, source);
+				if (pattern[i - 1] == 0) and symbol:match("^%a") then
+					symbol = (self.currencySpacing and self.currencySpacing.beforeCurrency.insertBetween or " ") .. symbol;
+				end;
+				ret = checker.addpart(ret, "currency", symbol, source);
 			end;
+		elseif compact then
+			local prefix, compact, suffix = checker.spacestoparts(v);
+			if prefix then
+				ret = checker.addpart(ret, "literal", prefix, source);
+			end;
+			ret = checker.addpart(ret, "compact", compact, source);
+			if suffix then
+				ret = checker.addpart(ret, "literal", suffix, source);
+			end;
+		else
+			ret = checker.addpart(ret, "literal", v, source);
 		end;
 	end;
 	return ret;
@@ -108,17 +108,16 @@ function format(self, parts, value0, value1)
 			local minfrac, maxfrac = self.minimumFractionDigits, self.maximumFractionDigits;
 			if self.notation == "compact" then
 				--[=[ Compact decimal formatting ]=]--
-				-- The rounding is one tricky code to deal with
 				if self.isSignificant then
-					rawvalue = negt .. checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					rawvalue = negt .. checker.raw_format_sig(negt, post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
-					rawvalue = negt .. checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					rawvalue = negt .. checker.raw_format(negt, post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
-				post = post:gsub('^0+$', '');
+				post = post:gsub('^0+', '');
 				local intlen = #post:gsub('%..*', '') - 3;
 				local compact_val = post;
 				-- Just in case, that pattern is '0'
-				-- Why max math.min 12? because 12 is the highest compact value CLDR supported (trillion)
+				-- Why max math.min 12? because 12 is the highest compact digits CLDR supported (trillion)
 				-- But if this changes, I might use #self.compactPattern.other
 				if self.compactPattern.other[math.min(intlen, 12)] then
 					compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
@@ -127,18 +126,18 @@ function format(self, parts, value0, value1)
 					standardPattern = self.standardNPattern;
 				end;
 				if not (minfrac or maxfrac) then
-					maxfrac = ((#compact_val:gsub('%.%d*$', '') < 2) and 1 or 0);
+					maxfrac = math.max(2 - ((compact_val:find('%.') or (#compact_val + 1)) - 1) + #(compact_val:gsub('%.', ''):match("^0+") or ''), 0);
 				end;
 				
 				local formatted_compact_val;
 				if self.isSignificant then
-					formatted_compact_val = checker.raw_format_sig(compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					formatted_compact_val = checker.raw_format_sig(negt, compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
-					formatted_compact_val = checker.raw_format(compact_val, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					formatted_compact_val = checker.raw_format(negt, compact_val, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
 				
 				-- Check if 9's are rounded through 10 via length, remove decimals
-				if #formatted_compact_val:gsub("%.%d*$", '') == #compact_val:gsub("%.%d*$", '') then
+				if #formatted_compact_val:gsub("%.%d*$", ''):gsub('^0+', '') == #compact_val:gsub("%.%d*$", '') then
 					post = formatted_compact_val;
 				else
 					intlen = intlen + 1;
@@ -146,9 +145,9 @@ function format(self, parts, value0, value1)
 						compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0) - 1);
 					end;
 					if self.isSignificant then
-						post = checker.raw_format_sig(compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+						post = checker.raw_format_sig(negt, compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 					else
-						post = checker.raw_format(compact_val, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+						post = checker.raw_format(negt, compact_val, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 					end;
 				end;
 				
@@ -158,23 +157,23 @@ function format(self, parts, value0, value1)
 				end;
 			elseif self.notation == "standard" then
 				if self.isSignificant then
-					post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					post = checker.raw_format_sig(negt, post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
-					post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					post = checker.raw_format(negt, post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
 				rawvalue = negt .. post;
 			else
 				if self.isSignificant then
-					rawvalue = negt .. checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					rawvalue = negt .. checker.raw_format_sig(negt, post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
-					rawvalue = negt .. checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					rawvalue = negt .. checker.raw_format(negt, post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
 				post, expt = exp(post, self.notation == "engineering"):match("^(%d*%.?%d*)E(-?%d*)$");
 				
 				if self.isSignificant then
-					post = checker.raw_format_sig(post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					post = checker.raw_format_sig(negt, post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 				else
-					post = checker.raw_format(post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					post = checker.raw_format(negt, post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
 			end;
 		elseif (post ~= "inf") and (post ~= "infinity") then
@@ -289,7 +288,7 @@ function format(self, parts, value0, value1)
 		local standard = format_pattern(self, selectedPattern and (parts and checker.initializepart() or checker.initializestringbuilder{}) or start, post, pattern, negt, false, source);
 		
 		if selectedPattern then
-			standard = format_pattern(self, start, standard, (negt and selectedPattern.negtoken) or selectedPattern.postoken or selectedPattern, negt, parts, source);
+			standard = format_pattern(self, start, standard, (negt and selectedPattern.negtoken) or selectedPattern.postoken or selectedPattern, negt, true, source);
 		end;
 		if i == 0 then
 			ret0 = standard;
@@ -299,6 +298,22 @@ function format(self, parts, value0, value1)
 	end;
 	
 	--[=[ Unit ]=]--
+	-- Strip spaces
+	if ret0[1] and table.find(checker.spaces, ret0[1].value or ret0[1]) then
+		table.remove(ret0, 1);
+	end;
+	if ret0[#ret0] and table.find(checker.spaces, ret0[#ret0].value or ret0[#ret0]) then
+		table.remove(ret0);
+	end;
+	if ret1 then
+		if ret1[1] and table.find(checker.spaces, ret1[1].value or ret1[1]) then
+			table.remove(ret1, 1);
+		end;
+		if ret1[#ret1] and table.find(checker.spaces, ret1[#ret1].value or ret1[#ret1]) then
+			table.remove(ret1);
+		end;
+	end;
+	--
 	local ret = ret1 and (parts and checker.formattoparts(nil, checker.initializepart(), self.rangePattern, 'shared', ret0, ret1)
 			or self.rangePattern:gsub('{0}', table.concat(ret0)):gsub('{1}', table.concat(ret1)))
 		or (parts and ret0 or table.concat(ret0));
@@ -335,7 +350,7 @@ end;
 function methods:FormatRange(...)
 	local len = select('#', ...);
 	if len < 2 then
-		error("Missing argument #".. (len + 1) .." (number expected)", 2);
+		error("Missing argument #".. (len + 1) .." (number expected)", 3);
 	end;
 	local value0, value1 = ...;
 	if value1 == nil then
@@ -346,7 +361,7 @@ end;
 function methods:FormatRangeToParts(...)
 	local len = select('#', ...);
 	if len < 2 then
-		error("Missing argument #".. (len + 1) .." (number expected)", 2);
+		error("Missing argument #".. (len + 1) .." (number expected)", 3);
 	end;
 	local value0, value1 = ...;
 	if value1 == nil then
