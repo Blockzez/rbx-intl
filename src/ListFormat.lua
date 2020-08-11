@@ -3,7 +3,7 @@ local intl_proxy = setmetatable({ }, checker.weaktable);
 local lf = { };
 
 local function format_to_parts(self, value)
-	local ret, pret = nil, checker.checker.initializepart();
+	local ret, pret = nil, checker.initializepart();
 	for _, v in ipairs((#value == 2) and self.t or self.s) do
 		if v == 0 then
 			pret = pret .. { type = "element", value = value[1] };
@@ -15,7 +15,7 @@ local function format_to_parts(self, value)
 	end;
 	if #value > 2 then
 		for i0 = 3, #value do
-			ret = checker.checker.initializepart();
+			ret = checker.initializepart();
 			for i1, v1 in ipairs((i0 == #value and self.e) or self.m) do
 				if v1 == 0 then
 					ret = ret .. pret;
@@ -57,11 +57,10 @@ local function format(self, value)
 		if len > 1 and type(value[i]) ~= "string" then
 			error("yielded " .. tostring(value[i]) .. " which is not a string", 4);
 		end;
-		ret = ret:gsub('{1}', self.pattern['middle']:gsub('{0}', value[i], self.locale, self.options));
+		ret = ret:gsub('{1}', self.pattern['middle']:gsub('{0}', value[i]));
 	end;
 	return ret:gsub('{1}', self.pattern['end']:gsub('{0}', value[len - 1]):gsub('{1}', value[len]));
 end;
-
 
 local methods = checker.initalize_class_methods(intl_proxy);
 function methods:Format(...)
