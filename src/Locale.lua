@@ -9,7 +9,7 @@ l._private =
 
 local u_alias =
 {
-	va = "variant",
+	va = "variants",
 	ca = "calendar",
 	hc = "hourCycle",
 	nu = "numberingSystem",
@@ -25,11 +25,13 @@ end;
 table.sort(u_extension_order, function(l, r)
 	return l[1] < r[1];
 end);
+local function sort_variant(l, r)
+	return l < r;
+end;
 
 local validOptions = {
 	region = true,
 	script = true,
-	variant = true,
 	calendar = true,
 	hourCycle = true,
 	numberingSystem = true,
@@ -58,7 +60,7 @@ local check = {
 	region = function(str, nomod)
 		return str and (str:match("^%a%a$") or str:match("^%d%d%d$")) and (nomod and str or localedata.getalias('territoryAlias', str:upper()));
 	end,
-	variant = function(str, nomod)
+	variants = function(str, nomod)
 		return str and (str:match("^%d%w%w%w$") or str:match("^%w%w%w%w%w%w?%w?%w?$")) and (nomod and str or str:lower());
 	end,
 	u = function(str)
@@ -129,9 +131,11 @@ local function parse_identifier(identifier)
 	
 	-- The variant must only contain latin alphabets and must contain exactly 5-8 characters
 	-- OR it must begin with a digit and must only contain alphanumeric characters and must contain exactly 4 character
-	if check.variant(parts[1], true) then
-		ret.variant = table.remove(parts, 1):lower();
+	ret.variants = { };
+	while check.variants(parts[1], true) do
+		table.insert(ret.variants, table.remove(parts, 1):lower());
 	end;
+	table.sort(ret.variants, sort_variant)
 	
 	-- An extra/invalid part
 	if parts[1] then
@@ -174,20 +178,20 @@ local methods = setmetatable({ }, {
 });
 
 function methods:Minimize()
-	local language, script, region, variant = localedata.rawminimize(self);
-	local ret = { script = script, region = region, variant = variant };
+	local language, script, region, variants = localedata.rawminimize(self);
+	local ret = { script = script, region = region, variants = variants };
 	for property, value in next, intl_proxy[self] do
-		if property ~= "script" and property ~= "region" and property ~= "variant" and property ~= "baseName" then
+		if property ~= "script" and property ~= "region" and property ~= "variants" and property ~= "baseName" then
 			ret[property] = value;
 		end;
 	end;
 	return l.new(language, ret);
 end;
 function methods:Maximize()
-	local language, script, region, variant = localedata.rawmaximize(self);
-	local ret = { script = script, region = region, variant = variant };
+	local language, script, region, variants = localedata.rawmaximize(self);
+	local ret = { script = script, region = region, variants = variants };
 	for property, value in next, intl_proxy[self] do
-		if property ~= "script" and property ~= "region" and property ~= "variant" and property ~= "baseName" then
+		if property ~= "script" and property ~= "region" and property ~= "variants" and property ~= "baseName" then
 			ret[property] = value;
 		end;
 	end;
@@ -197,7 +201,7 @@ function methods:GetParent()
 	self = intl_proxy[self];
 	local ext = { };
 	for property, value in next, self do
-		if property ~= "script" and property ~= "region" and property ~= "variant" and property ~= "baseName" then
+		if property ~= "script" and property ~= "region" and property ~= "variants" and property ~= "baseName" then
 			ext[property] = value;
 		end;
 	end;
@@ -210,8 +214,14 @@ function methods:GetParent()
 	end;
 	return l.new(ret, ext);
 end;
+function methods:GetVariants()
+	return table.move(intl_proxy[self].variants, 1, #intl_proxy[self].variants, 1, table.create(#intl_proxy[self].variants));
+end;
 
 local function index(self, index)
+	if index == "variants" or index == "Variants" then
+		return nil;
+	end;
 	if methods[index] then
 		return methods[index];
 	elseif intl_proxy[self][index] then
@@ -226,14 +236,14 @@ local function tostr(self)
 	self = intl_proxy[self];
 	local u_ext;
 	for _, v in next, u_extension_order do
-		if (v[2] ~= "variant" or self.variant == "posix") and self[v[2]] then
-			u_ext = (u_ext or '-u') .. '-' .. v[1] .. '-' .. self[v[2]];
+		if (v[2] ~= "variants" or (#self.variants == 1 and self.variants[1] == "posix")) and self[v[2]] then
+			u_ext = (u_ext or '-u') .. '-' .. v[1] .. '-' .. (v[2] == "variants" and self[v[2]][1] or self[v[2]]);
 		end;
 	end;
 	return (self.language)
 		.. (self.script and ('-' .. self.script) or '')
 		.. (self.region and ('-' .. self.region) or '')
-		.. (self.variant and self.variant ~= "posix" and ('-' .. self.variant) or '')
+		.. (self.variants[1] and (#self.variants > 1 or self.variants[1] ~= "posix") and ('-' .. table.concat(self.variants, '-')) or '')
 		.. (u_ext or '');
 end;
 
@@ -276,19 +286,37 @@ function l.new(...)
 				error("Incorrect locale information provided", 2);
 			end;
 			for key, value in next, options do
-				value = ((key ~= 'x' and check[key]) or check.u_item)(value);
-				if not value then
-					error("Incorrect locale information provided", 2);
-				end;
-				if validOptions[key] then
-					data[key] = value;
+				if key == "variants" and type(value) == "table" then
+					local copy = { };
+					for i, v in ipairs(value) do
+						if type(v) ~= "string" then
+							error("Incorrect locale information provided", 2);
+						end;
+						v = check.variants(v);
+						if not v then
+							error("Incorrect locale information provided", 2);
+						end;
+						copy[i] = v;
+					end;
+					data[key] = copy;
+				else
+					if type(value) ~= "string" then
+						error("Incorrect locale information provided", 2);
+					end;
+					value = ((key ~= 'x' and check[key]) or check.u_item)(value);
+					if not value then
+						error("Incorrect locale information provided", 2);
+					end;
+					if validOptions[key] then
+						data[key] = key == "variants" and { value } or value;
+					end;
 				end;
 			end;
 		end;
 		data.baseName = (data.language)
 			.. (data.script and ('-' .. data.script) or '')
 			.. (data.region and ('-' .. data.region) or '')
-			.. (data.variant and (data.variant == "posix" and '-u-va-posix' or ('-' .. data.variant)) or '');
+			.. (data.variants[1] and (#data.variants == 1 and data.variants[1] == "posix" and '-u-va-posix' or ('-' .. table.concat(data.variants, '-'))) or '');
 	elseif intl_proxy[value] then
 		-- Locale data, since this is immutible it doesn't matter whether it's passed by referenece or not
 		data = intl_proxy[value];
