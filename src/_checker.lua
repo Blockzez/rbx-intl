@@ -54,7 +54,7 @@ local valid_value_property =
 	['dn/fallback'] = { "code", "none" },
 	
 	["nu/compactDisplay"] = "%display2",
-	["nu/currencyDisplay"] = { "symbol", "narrowSymbol", "code", "name" },
+	["nu/currencyDisplay"] = { "symbol", "narrowSymbol", "code", "name", "hidden" },
 	["nu/currencySign"] = { "standard", "accounting" },
 	["nu/notation"] = { "standard", "compact", "scientific", "engineering" },
 	["nu/signDisplay"] = { "auto", "never", "always", "exceptZero" },
@@ -69,7 +69,7 @@ local valid_value_property =
 	["nu/maximumSignificantDigits"] = "f/minimumSignificantDigits..inf",
 	["nu/currency"] = "lp/^%a%a%a$",
 	["nu/unit"] = "f/str",
-	["nu/rounding"] = { "halfUp", "halfEven", "halfDown", "ceiling", "floor" },
+	["nu/rounding"] = { "halfUp", "halfEven", "halfDown", "up", "down", "ceiling", "floor" },
 	
 	["pr/type"] = { 'cardinal', 'ordinal' },
 	
@@ -92,7 +92,7 @@ local valid_value_property =
 	["lf/type"] = { "conjunction", "disjunction", "unit" },
 	["lf/style"] = "%display1",
 	
-	["sg/granularity"] = { "grapheme", "word", "sentence" }
+	["sg/granularity"] = { "grapheme", "word", "sentence" },
 };
 local function check_property(tbl_out, tbl_to_check, property, default)
 	local check_values = valid_value_property[property];
@@ -157,7 +157,7 @@ function c.negotiatelocale(ttype, locales)
 		if (not data) and localedata.exists(ttype, locale) then
 			data = localedata.getdata(ttype, locale);
 			locales = locale;
-			-- The reason why it didn't break to ensure the others are also a valid locale identifier
+			-- The reason why it didn't break it is to ensure the others are also a valid locale identifier
 		end;
 	end;
 	if not data then
@@ -552,12 +552,12 @@ end;
 
 -- Global functions
 -- Lua doesn't recognise \xa0 as spaces.
-local spaces = { utf8.char(0x0020), utf8.char(0x00A0), utf8.char(0x1680), utf8.char(0x180E), utf8.char(0x2000), utf8.char(0x2001), utf8.char(0x2002), utf8.char(0x2003), 
+c.spaces = { utf8.char(0x0020), utf8.char(0x00A0), utf8.char(0x1680), utf8.char(0x180E), utf8.char(0x2000), utf8.char(0x2001), utf8.char(0x2002), utf8.char(0x2003), 
 	utf8.char(0x2004), utf8.char(0x2005), utf8.char(0x2006), utf8.char(0x2007), utf8.char(0x2008), utf8.char(0x2009), utf8.char(0x200A), utf8.char(0x200B), utf8.char(0x202F), utf8.char(0x205F), utf8.char(0x3000), utf8.char(0xFEFF) };
 
 function c.spacestoparts(value)
 	local left, right;
-	for _, v in ipairs(spaces) do
+	for _, v in ipairs(c.spaces) do
 		if value:sub(1, #v) == v then
 			left, value = v, value:sub(#v + 1);
 		end;
@@ -570,19 +570,8 @@ end;
 
 --
 function c.negotiate_plural_table(tbl, plural_rule, value0, value1)
-	local plural0, plural1 = plural_rule:Select(value0), value1 and plural_rule:Select(value1);
-	local plural;
-	if value1 then
-		local data = localedata.supplemental['plurals-type-pluralRanges'];
-		local pos = localedata.minimizestr(plural_rule:ResolvedOptions().locale.baseName);
-		while (not data[pos]) and pos do
-			pos = localedata.negotiateparent(pos);
-		end;
-		plural = (data[pos] and data[pos][plural0] and data[pos][plural0][plural1]) or plural1
-	else
-		plural = plural0;
-	end;
-	return (not value1 and (tbl[tostring(value0)] or tbl[tostring(value0)])) or tbl[plural] or tbl['other'];
+	return (not value1 and (tbl[tostring(value0)] or tbl[tostring(value0)])) or
+		tbl[value1 and plural_rule:SelectRange(value0, value1) or plural_rule:Select(value0)] or tbl['other'];
 end;
 
 function c.negotiate_numbering_system(tbl, ...)
@@ -634,15 +623,23 @@ function c.substitute(str, nu)
 	return str;
 end;
 
-local function quantize(val, exp, rounding)
+local function quantize(isneg, val, exp, rounding)
 	local d, e = ('0' .. val):gsub('%.', ''), (val:find('%.') or (#val + 1)) + 1;
 	local pos = e + exp;
 	if pos > #d then
 		return val:match("^(%d*)%.?(%d*)$");
 	end;
 	d = d:split('');
-	local add = rounding == 'ceiling';
-	if rounding ~= "ceiling" and rounding ~= "floor" then
+	local add = rounding == 'up' or rounding == (isneg and "floor" or "ceiling");
+	if add then
+		for i = d[pos], #d do
+			if d[pos] ~= '0' then
+				add = false;
+				break;
+			end;
+		end;
+		add = not add;
+	elseif rounding:match("^half") then
 		add = d[pos]:match(((rounding == "halfEven" and (d[pos - 1] or '0'):match('[02468]')) or rounding == "halfDown") and '[6-9]' or '[5-9]');
 	end;
 	for p = pos, #d do
@@ -666,10 +663,10 @@ local function scale(val, exp)
 	local dpos = (val:find("[.,]") or (len + 1)) + exp;
 	return unscaled:sub(1, dpos - 1) .. '.' .. unscaled:sub(dpos);
 end;
-function c.raw_format(val, minintg, maxintg, minfrac, maxfrac, rounding)
+function c.raw_format(negval, val, minintg, maxintg, minfrac, maxfrac, rounding)
 	local intg, frac;
 	if maxfrac and maxfrac ~= math.huge then
-		intg, frac = quantize(val, maxfrac, rounding);
+		intg, frac = quantize(negval == '-', val, maxfrac, rounding);
 	else
 		intg, frac = val:match("^(%d*)%.?(%d*)$");
 	end;
@@ -689,13 +686,13 @@ function c.raw_format(val, minintg, maxintg, minfrac, maxfrac, rounding)
 	end;
 	return intg .. '.' .. frac;
 end;
-function c.raw_format_sig(val, min, max, rounding)
+function c.raw_format_sig(negval, val, min, max, rounding)
 	local intg, frac = val:match("^(%d*)%.?(%d*)$");
 	intg, frac = intg:gsub('^0+', ''), frac:gsub('0+$', '');
 	intg = intg == '' and '0' or intg;
 	if max and max ~= math.huge then
 		val = intg .. '.' .. frac;
-		intg, frac = quantize(val, max - ((val:find('%.') or (#val + 1)) - 1), rounding);
+		intg, frac = quantize(negval == '-', val, max - ((val:find('%.') or (#val + 1)) - 1) + #(val:gsub('%.', ''):match("^0+") or ''), rounding);
 		intg, frac = intg:gsub('^0+', ''), frac:gsub('0+$', '');
 		intg = intg == '' and '0' or intg;
 	end;
@@ -728,9 +725,8 @@ function c.parse_exp(val)
 	return nil;
 end;
 function c.num_to_str(value, scale_v)
-	local value_type = typeof(value);
-	if value_type == "number" then
-		value = ('%.17f'):format(value);
+	if type(value) == "number" then
+		value = (value % 1 == 0 and '%.0f' or '%.17f'):format(value);
 	else
 		value = tostring(value);
 		value = c.parse_exp(value) or value:lower();
