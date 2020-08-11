@@ -35,11 +35,12 @@ function d.getlocalename(locale)
 	return (locale.language)
 		.. (locale.script and ('-' .. locale.script) or '')
 		.. (locale.region and ('-' .. locale.region) or '')
-		.. (locale.variant and ('-' .. locale.variant:upper()) or '');
+		.. (#locale:GetVariants() > 0 and ('-' .. table.concat(locale:GetVariants(), '-'):upper()) or '');
 end;
 function d.getlocaleparts(locale)
 	if type(locale) == "string" then
-		local script, region, variant;
+		local script, region;
+		local variants = {};
 		local parts = locale:gsub('%-u%-.+', ''):split('-');
 		if not (parts[1] and (parts[1]:match("^%a%a%a?%a?%a?%a?%a?%a?$") and #parts[1] ~= 4) or parts[1] == "root") then
 			return nil;
@@ -51,15 +52,15 @@ function d.getlocaleparts(locale)
 		if parts[1] and (parts[1]:match("^%a%a$") or parts[1]:match("^%d%d%d$")) then
 			region = d.getalias('territoryAlias', table.remove(parts, 1):upper());
 		end;
-		if parts[1] and (parts[1]:match("^%d%w%w%w$") or parts[1]:match("^%w%w%w%w%w%w?%w?%w?$")) then
-			variant = table.remove(parts, 1):upper();
+		while parts[1] and (parts[1]:match("^%d%w%w%w$") or parts[1]:match("^%w%w%w%w%w%w?%w?%w?$")) do
+			table.insert(variants, table.remove(parts, 1):upper());
 		end;
 		if #parts > 0 then
 			return nil;
 		end;
-		return language, script, region, variant;
+		return language, script, region, variants;
 	end;
-	return locale.language, locale.script, locale.region, locale.variant and locale.variant:upper();
+	return locale.language, locale.script, locale.region, locale:GetVariants();
 end;
 function d.rawmaximize(locale, exclude_und)
 	local language, script, region, variant = d.getlocaleparts(locale);
@@ -91,7 +92,7 @@ function d.maximizestr(locale, exclude_und)
 	return (ret_language)
 		.. ((ret_script and ('-' .. ret_script)) or '')
 		.. ((ret_region and ('-' .. ret_region)) or '')
-		.. ((variant and ('-' .. variant)) or '');
+		.. ((#variant > 0 and ('-' .. table.concat(variant, '-'))) or '');
 end;
 
 local reverseLikelySubtags = { };
@@ -142,9 +143,6 @@ function d.rawminimize(locale, exclude_und)
 	if ((not ret_region) or ((not exclude_und) and ret_region == "ZZ")) and (not (ret0 or ret1 or ret3)) then
 		ret_region = region;
 	end;
-	if ret_language == 'en' and (not ret_region) and variant == "POSIX" then
-		return 'en', ret_script, 'US', 'POSIX';
-	end;
 	return ret_language, ret_script, ret_region, variant;
 end;
 function d.minimizestr(locale, exclude_und)
@@ -152,7 +150,7 @@ function d.minimizestr(locale, exclude_und)
 	return (ret_language)
 		.. ((ret_script and ('-' .. ret_script)) or '')
 		.. ((ret_region and ('-' .. ret_region)) or '')
-		.. ((variant and ('-' .. variant)) or '');
+		.. ((#variant > 0 and ('-' .. table.concat(variant, '-'))) or '');
 end;
 
 local parentlocale = supplemental.parentLocales.parentLocale;
@@ -186,7 +184,7 @@ local function deepcopymerge(t0, t1)
 						copy[k] = deepcopymerge(t0[k], v);
 					end;
 				elseif Alias.isAlias(t0[k]) then
-					copy[k] = Alias.new(t0[k], v);
+					copy[k] = Alias.new(t0[k], deepcopymerge(v));
 				else
 					copy[k] = deepcopymerge(v);
 				end;
@@ -227,6 +225,13 @@ function d.getdata(ttype, locale)
 		return nil;
 	end;
 	locale = d.getlocalename(locale);
+	if ttype == "casing" then
+		local language = d.getlocaleparts(locale);
+		if language == "lt" or language == "tr" or language == "az" then
+			return language;
+		end;
+		return 'root';
+	end;
 	
 	local localepos = table.find(_cache.locale, ttype .. '/' .. locale);
 	if localepos then
@@ -234,8 +239,8 @@ function d.getdata(ttype, locale)
 	end;
 	
 	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
-	local ms = resolve_alias(deepcopymerge(rawgetdata(ttype, d.negotiateparent(minimized)) or rawgetdata(ttype, d.negotiateparent(maximized)), 
-		requireifnotnil(commons[ttype]:FindFirstChild(minimized)) or requireifnotnil(commons[ttype]:FindFirstChild(maximized))));
+	local ms = resolve_alias(deepcopymerge(rawgetdata(ttype, locale) or rawgetdata(ttype, d.negotiateparent(minimized)) or rawgetdata(ttype, d.negotiateparent(maximized)),
+		requireifnotnil(commons[ttype]:FindFirstChild(locale)) or requireifnotnil(commons[ttype]:FindFirstChild(minimized)) or requireifnotnil(commons[ttype]:FindFirstChild(maximized))));
 	
 	-- Merge calendar
 	if ms and ms.dates and ms.dates.calendars then
@@ -258,13 +263,25 @@ end;
 function d.exists(ttype, locale)
 	if locale == nil or locale == "root" then
 		return false;
+	elseif ttype == "casing" then
+		return true;
 	end;
 	locale = d.getlocalename(locale);
 	
 	local minimized, maximized = d.minimizestr(locale, true), d.maximizestr(locale, true);
-	return not not (d.exists(d.negotiateparent(minimized)) or d.exists(d.negotiateparent(maximized)) or commons[ttype]:FindFirstChild(minimized) or commons[ttype]:FindFirstChild(maximized));
+	return not not (d.exists(d.negotiateparent(minimized)) or d.exists(d.negotiateparent(maximized))
+		or commons[ttype]:FindFirstChild(locale) or commons[ttype]:FindFirstChild(minimized) or commons[ttype]:FindFirstChild(maximized));
 end;
 
+assert(d.exists('main', 'en-US-POSIX'))
+
 d.supplemental = supplemental;
+
+local casing = _data:WaitForChild("casing");
+d.casing = {
+	caseMapping = require(casing:WaitForChild("caseMapping")),
+	moreAbove = require(casing:WaitForChild("moreAbove")),
+	specialCasing = require(casing:WaitForChild("specialCasing")),
+};
 
 return d;
