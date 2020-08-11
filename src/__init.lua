@@ -1,5 +1,5 @@
 --[=[
-	Version 2.4.0
+	Version 2.5.0
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -286,6 +286,10 @@ local function is_latin(c)
 		or (c >= 0xFB00 and c <= 0xFB06) or (c >= 0xFF21 and c <= 0xFF3A) or (c >= 0xFF41 and c <= 0xFF5A));
 end;
 
+local function is_greek(c)
+	return c and (c >= 0x0370 and c <= 0x03FF) or (c >= 0x1F00 and c <= 0x1FFF);
+end;
+
 local function toupper(self)
 	for i, v in ipairs(self) do
 		self[i] = casing.caseMapping.upper[v] or v;
@@ -301,7 +305,7 @@ local whitespaces = { 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x
 local function tolower(self)
 	for i, v in ipairs(self) do
 		-- Final form of sigma
-		if self[i] == 0x03A3 and is_latin(self[i - 1]) and ((not self[i + 1]) or table.find(whitespaces, self[i + 1])) then
+		if self[i] == 0x03A3 and (is_latin(self[i - 1]) or is_greek(self[i - 1])) and ((not self[i + 1]) or table.find(whitespaces, self[i + 1])) then
 			self[i] = 0x03C2;
 		else
 			self[i] = casing.caseMapping.lower[v] or v;
@@ -311,7 +315,46 @@ local function tolower(self)
 		replace(false, self, old_value, new_value);
 	end;
 	return concat_utf8(self);
-end
+end;
+
+local function totitle_whitespace_index(self)
+	local last_whitespace = true;
+	local whitespace_index = { };
+	for i, v in ipairs(self) do
+		if table.find(whitespaces, self[i]) then
+			last_whitespace = true;
+		else
+			if last_whitespace then
+				table.insert(whitespace_index, i);
+			end;
+			-- Final form of sigma
+			if self[i] == 0x03A3 and is_latin(self[i - 1]) and ((not self[i + 1]) or table.find(whitespaces, self[i + 1])) then
+				self[i] = 0x03C2;
+			else
+				self[i] = (last_whitespace and (casing.caseMapping.title[v] or casing.caseMapping.upper[v])) or ((not last_whitespace) and casing.caseMapping.lower[v]) or v;
+			end;
+			last_whitespace = false;
+		end;
+	end;
+	return whitespace_index;
+end;
+
+local function totitle_from_whitespace_index(self, whitespace_index)
+	for old_value, new_value in next, casing.specialCasing.lower do
+		for i = 2, #whitespace_index do
+			replace(false, self, old_value, new_value, nil, whitespace_index[i - 1], whitespace_index[i] - 1);
+		end;
+	end;
+	local diff = 0;
+	for old_value, new_value in next, casing.specialCasing.title do
+		for _, v in ipairs(whitespace_index) do
+			local old_len = #self;
+			replace(false, self, old_value, new_value, nil, v + diff, v + diff);
+			diff = diff + (#self - old_len);
+		end;
+	end;
+	return concat_utf8(self);
+end;
 
 function modules.toLocaleUpper(...)
 	if select('#', ...) == 0 then
@@ -388,6 +431,79 @@ function modules.toLocaleLower(...)
 	return tolower(self);
 end;
 
+function modules.toLocaleTitle(...)
+	if select('#', ...) == 0 then
+		error("missing argument #1", 2);
+	end;
+	
+	local value, locale = ...;
+	if type(value) ~= "string" and type(value) ~= "number" then
+		error("invalid argument #1 (string expected, got " .. typeof(value) .. ')');
+	end;
+	local language = checker.negotiatelocale('casing', locale):Minimize().language;
+	local self = code_utf8(value);
+	local whitespace_index = totitle_whitespace_index(self);
+	
+	for i = 2, #whitespace_index do
+		-- Lower
+		-- Lithuanian
+		if language == "lt" then
+			-- Remove the dot after "i"
+			replace(false, self, { 0x0069, 0x0307 }, nil, whitespace_index[i - 1], whitespace_index[i]);
+		-- Turkish and Azeri
+		elseif language == 'tr' or language == "az" then
+			-- When uppercasing, i turns into a dotted capital I
+			replace(false, self, 0x0069, 0x0130, nil, whitespace_index[i - 1], whitespace_index[i]);
+		end;
+	end;
+	
+	local diff = 0;
+	for _, v in ipairs(whitespace_index) do
+		local old_len = #self;
+		-- Lithuanian
+		if language == 'lt' then
+			-- Introduce an explicit dot above when lowercasing capital I's and J's whenever there are more accents above.
+			for _, v in ipairs{ { 0x0049, 0x0069 }, { 0x004A, 0x006A }, { 0x012E, 0x012F } } do
+				local i0 = 0;
+				while i0 do
+					i0 = table.find(self, v[1], i0 + 1);
+					if i0 and i0 <= v + diff and casing.moreAbove[self[i0 + 1]] then
+						self[i0] = v[2];
+						table.insert(self, i0 + 1, 0x0307);
+					end;
+				end;
+			end;
+			diff, old_len = diff + (#self - old_len), #self;
+			
+			replace(false, self, 0x00CC, { 0x0069, 0x0307, 0x0300 }, nil, v + diff, v + diff);
+			diff, old_len = diff + (#self - old_len), #self;
+			replace(false, self, 0x00CD, { 0x0069, 0x0307, 0x0301 }, nil, v + diff, v + diff);
+			diff, old_len = diff + (#self - old_len), #self;
+			replace(false, self, 0x0128, { 0x0069, 0x0307, 0x0303 }, nil, v + diff, v + diff);
+			diff, old_len = diff + (#self - old_len), #self;
+		-- Turkish and Azeri
+		elseif language == 'tr' or language == "az" then
+			-- LATIN CAPITAL LETTER I WITH DOT ABOVE
+			replace(false, self, 0x0130, 0x0069, nil, v + diff, v + diff);
+			
+			-- When lowercasing, unless an I is before a dot_above, it turns into a dotless i.
+			local i0 = 0;
+			while i0 do
+				i0 = table.find(self, 0x0049, i0 + 1);
+				if i0 and i0 <= v + diff and (self[i0 + 1] ~= 0x0307) then
+					self[i0] = 0x0131;
+				end;
+			end;
+			diff, old_len = diff + (#self - old_len), #self;
+			
+			-- Remove dot above with sequence i
+			replace(false, self, { 0x0049, 0x0307 }, 0x0049, nil, v + diff, v + diff);
+			diff, old_len = diff + (#self - old_len), #self;
+		end;
+	end;
+	
+	return totitle_from_whitespace_index(self, whitespace_index);
+end;
 --
 
 function modules.getCanonicalLocales(locales)
