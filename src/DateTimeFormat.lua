@@ -223,6 +223,9 @@ local getvalue =
 			end;
 			return zero_pad_substitute(date.year, n, self.numberingSystem);
 		end;
+		r = function(self, date, n)
+			return zero_pad_substitute(date.gregorian_year, 1, self.numberingSystem);
+		end;
 		U = function(self, date, n)
 			return self.data.cyclicNameSets.years.format[n == 5 and 'narrow' or (n == 4 and 'wide' or 'abbreviated')][(date.year % 60) - 3];
 		end;
@@ -317,8 +320,8 @@ local getvalue =
 
 local typename =
 {
-	G = 'era',
-	y = "year", Y = 'year', u = "year", U = "year",
+	G = "era",
+	y = "year", Y = "year", u = "year", U = "year", r = "year",
 	Q = "quarter", q = "quarter",
 	M = "month", L = "month", l = "month",
 	w = "week", W = "week",
@@ -552,6 +555,7 @@ local function format(self, parts, date0, date1)
 	local info0 = {
 		era = era0,
 		year = year0,
+		gregorian_year = rawyear0,
 		month = month0,
 		weekday = weekday0 or determine_weekdays(rawyear0, rawmonth0, rawday0),
 		day = day0 or 1,
@@ -570,6 +574,7 @@ local function format(self, parts, date0, date1)
 		info1 = {
 			era = era1,
 			year = year1,
+			gregorian_year = rawyear1,
 			month = month1,
 			weekday = weekday1 or determine_weekdays(rawyear1, rawmonth1, rawday1),
 			day = day1 or 1,
