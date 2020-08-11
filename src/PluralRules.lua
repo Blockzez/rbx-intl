@@ -19,6 +19,7 @@ local function is_in_range(value, range)
 	return not not table.find(range, value);
 end;
 
+
 local function cldr_mod(left, right)
 	-- Java modulus
 	if type(left) == "string" and #left > 15 then
@@ -130,52 +131,39 @@ local function pr_select(rules, val)
 	return 'other';
 end;
 
-local _CACHE = setmetatable({ }, checker.weaktable);
-local function pselect(self, ...)
-	if select('#', ...) == 0 then
-		error("missing argument #1 (number expected)", 2);
+local function pselect(self, value)
+	if not self.rule then
+		return 'other';
 	end;
-	local value = ...;
-	if type(value) == "number" then
-		value = ('%.11f'):format(value):gsub('0+$', '');
-	else
-		value = tostring(value);
-		value = checker.parse_exp(value) or value;
-	end;
-	value = value:match("^[%+%-]?(%d*%.?%d*)$");
+	local negt;
+	negt, value = checker.num_to_str(value):match("^([%+%-]?)(%d*%.?%d*)$");
 	if not value then
 		return 'other';
 	end;
 	if self.isSignificant then
-		value = checker.raw_format_sig(value, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+		value = checker.raw_format_sig(negt, value, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
 	else
-		value = checker.raw_format(value, self.minimumIntegerDigits, self.maximumIntegerDigits, self.minimumFractionDigits, self.maximumFractionDigits, self.rounding);
+		value = checker.raw_format(negt, value, self.minimumIntegerDigits, self.maximumIntegerDigits, self.minimumFractionDigits, self.maximumFractionDigits, self.rounding);
 	end;
-	if _CACHE[self] ~= nil then
-		return pr_select(_CACHE[self], value);
-	end;
-	local data = localedata.supplemental['plurals-type-' .. self.type];
-	local pos = localedata.minimizestr(self.locale.baseName);
-	while (data[pos] == nil) and pos do
-		pos = localedata.negotiateparent(pos);
-	end;
-	if data[pos] then
-		local rule = {
-			zero = generate(data[pos].zero),
-			one = generate(data[pos].one),
-			two = generate(data[pos].two),
-			few = generate(data[pos].few),
-			many = generate(data[pos].many),
-		};
-		_CACHE[self] = rule;
-		return pr_select(rule, value);
-	end;
-	_CACHE[self] = false;
-	return 'other';
+	return pr_select(self.rule, value);
 end;
 
 local methods = checker.initalize_class_methods(intl_proxy);
-methods.Select = pselect;
+function methods:Select(...)
+	if select('#', ...) == 0 then
+		error("missing argument #1 (number expected)", 3);
+	end;
+	return pselect(self, (...));
+end;
+function methods:SelectRange(...)
+	local len = select('#', ...);
+	if len == 0 then
+		error("Missing argument #".. (len + 1) .." (number expected)", 3);
+	end;
+	local value0, value1 = ...;
+	local count0, count1 = pselect(self, value0), pselect(self, value1);
+	return (self.rangerule and self.rangerule[count0] and self.rangerule[count0][count1]) or count1;
+end;
 function methods:ResolvedOptions()
 	local ret = { };
 	ret.locale = self.locale;
@@ -188,53 +176,58 @@ function methods:ResolvedOptions()
 		ret.minimumFractionDigits = self.minimumFractionDigits;
 		ret.maximumFractionDigits = self.maximumFractionDigits;
 	end;
-	ret.midpointRounding = self.midpointRounding;
+	ret.rounding = self.rounding;
 	return ret;
 end;
 function methods:All()
 	local ret = { 'other' };
-	local data = _CACHE[self];
-	if data == nil then
-		data = localedata.supplemental['plurals-type-' .. self.type];
-		local pos = localedata.minimizestr(self.locale.baseName);
-		while (data[pos] == nil) and pos do
-			pos = localedata.negotiateparent(pos);
-		end;
-		data = data[pos];
-		_CACHE[self] = data or false;
-	end;
-	if data then
-		if data.many then
-			table.insert(ret, 1, 'many');
-		end;
-		if data.few then
-			table.insert(ret, 1, 'few');
-		end;
-		if data.two then
-			table.insert(ret, 1, 'two');
-		end;
-		if data.one then
-			table.insert(ret, 1, 'one');
-		end;
-		if data.zero then
-			table.insert(ret, 1, 'zero');
+	if self.data then
+		for v in ipairs{ 'many', 'few', 'two', 'one', 'zero' } do
+			if self.data[v] then
+				table.insert(ret, 1, v);
+			end;
 		end;
 	end;
 	return ret;
 end;
-
 function p.new(...)
 	local option = checker.options('pr', ...);
 	
-	local pointer = newproxy(true);
-	local pointer_mt = getmetatable(pointer);
-	intl_proxy[pointer] = option;
+	local data = localedata.supplemental['plurals-type-' .. option.type];
+	local minimized = localedata.minimizestr(option.locale.baseName);
+	local pos = minimized;
+	while (data[pos] == nil) and pos do
+		pos = localedata.negotiateparent(pos);
+	end;
+	if data[pos] then
+		local rule = {
+			zero = generate(data[pos].zero),
+			one = generate(data[pos].one),
+			two = generate(data[pos].two),
+			few = generate(data[pos].few),
+			many = generate(data[pos].many),
+		};
+		option.rule = rule;
+	end;
 	
-	pointer_mt.__index = methods;
-	pointer_mt.__tostring = checker.tostring('PluralRules', pointer);
-	pointer_mt.__newindex = checker.readonly;
-	pointer_mt.__metatable = checker.lockmsg;
-	return pointer;
+	local rangedata = localedata.supplemental['plurals-type-pluralRanges'];
+	pos = minimized;
+	while (not rangedata[pos]) and pos do
+		pos = localedata.negotiateparent(pos);
+	end;
+	if rangedata[pos] then
+		option.rangerule = rangedata[pos];
+	end;
+	
+	local object = newproxy(true);
+	local object_mt = getmetatable(object);
+	intl_proxy[object] = option;
+	
+	object_mt.__index = methods;
+	object_mt.__tostring = checker.tostring('PluralRules', object);
+	object_mt.__newindex = checker.readonly;
+	object_mt.__metatable = checker.lockmsg;
+	return object;
 end;
 
 function p.SupportedLocalesOf(locales)
