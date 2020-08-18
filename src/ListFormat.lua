@@ -2,80 +2,63 @@ local checker = require(script.Parent:WaitForChild("_checker"));
 local intl_proxy = setmetatable({ }, checker.weaktable);
 local lf = { };
 
-local function format_to_parts(self, value)
-	local ret, pret = nil, checker.initializepart();
-	for _, v in ipairs((#value == 2) and self.t or self.s) do
+local function format(self, parts, value)
+	local len = #value;
+	if len == 0 then
+		return parts and { } or '';
+	elseif type(value[1]) ~= "string" then
+		error("yielded " .. typeof(value[1]) .. " which is not a string", 4);
+	elseif len == 1 then
+		return parts and { { type = "element", value = value[1] } } or value[1];
+	elseif type(value[2]) ~= "string" then
+		error("yielded " .. typeof(value[2]) .. " which is not a string", 4);
+	end;
+	
+	local ret, pret = nil, parts and checker.initializepart() or checker.initializestringbuilder{};
+	for _, v in ipairs((len == 2) and self.t or self.s) do
 		if v == 0 then
-			pret = pret .. { type = "element", value = value[1] };
+			checker.addpart(pret, "element", value[1]);
 		elseif v == 1 then
-			pret = pret .. { type = "element", value = value[2] };
+			checker.addpart(pret, "element", value[2]);
 		else
-			pret = pret .. { type = "literal", value = v };
+			checker.addpart(pret, "literal", v);
 		end;
 	end;
-	if #value > 2 then
-		for i0 = 3, #value do
-			ret = checker.initializepart();
-			for i1, v1 in ipairs((i0 == #value and self.e) or self.m) do
+	if len > 2 then
+		for i0 = 3, len do
+			if type(value[i0]) ~= "string" then
+				error("yielded " .. typeof(value[i0]) .. " which is not a string", 4);
+			end;
+			ret = parts and checker.initializepart() or checker.initializestringbuilder{};
+			for i1, v1 in ipairs((i0 == len and self.e) or self.m) do
 				if v1 == 0 then
 					ret = ret .. pret;
 				elseif v1 == 1 then
-					ret = ret .. { type = "element", value = value[i0] };
+					checker.addpart(ret, "element", value[i0]);
 				else
-					ret = ret .. { type = "literal", value = v1 };
+					checker.addpart(ret, "literal", v1);
 				end;
 			end;
 			pret = ret;
 		end;
-	else
-		pret = ret
 	end;
 	
-	return setmetatable(ret, nil);
+	return parts and setmetatable(pret, nil) or table.concat(pret);
 end;
-
-local function format(self, value)
-	local len = #value;
-	if type(value[1]) ~= "string" then
-		error("yielded " .. tostring(value[1]) .. " which is not a string", 4);
-	elseif type(value[len]) ~= "string" then
-		error("yielded " .. tostring(value[len]) .. " which is not a string", 4);
-	elseif len > 1 and type(value[len - 1]) ~= "string" then
-		error("yielded " .. tostring(value[len - 1]) .. " which is not a string", 4);
-	elseif len > 1 and type(value[2]) ~= "string" then
-		error("yielded " .. tostring(value[2]) .. " which is not a string", 4);
-	end;
-	if len == 0 then
-		return '';
-	elseif len == 1 then
-		return tostring(value[1]);
-	elseif len == 2 then
-		return self.pattern['2']:gsub("{0}", value[1]):gsub("{1}", value[2]);
-	end;
-	local ret = self.pattern['start']:gsub('{0}', value[1]);
-	for i = 2, len - 2 do
-		if len > 1 and type(value[i]) ~= "string" then
-			error("yielded " .. tostring(value[i]) .. " which is not a string", 4);
-		end;
-		ret = ret:gsub('{1}', self.pattern['middle']:gsub('{0}', value[i]));
-	end;
-	return ret:gsub('{1}', self.pattern['end']:gsub('{0}', value[len - 1]):gsub('{1}', value[len]));
-end;
-
 local methods = checker.initalize_class_methods(intl_proxy);
 function methods:Format(...)
 	local len = select('#', ...);
 	if len < 1 then
 		error("missing argument #1 (table expected)", 3);
 	end;
-	return (format(self, (...), { }));
+	return (format(self, false, (...)));
 end;
 function methods:FormatToParts(...)
 	local len = select('#', ...);
 	if len < 1 then
 		error("missing argument #1 (table expected)", 3);
 	end;
-	return (format_to_parts(self, (...), { }));
+	return (format(self, true, (...)));
 end;
 function methods:ResolvedOptions()
 	local ret = { };
