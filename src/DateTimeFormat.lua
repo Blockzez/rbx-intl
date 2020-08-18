@@ -2,6 +2,7 @@ local localedata = require(script.Parent:WaitForChild("_localedata"));
 local checker = require(script.Parent:WaitForChild("_checker"));
 local intl_proxy = setmetatable({ }, checker.weaktable);
 local dtf = { };
+local ipairs = ipairs;
 
 --[=[
 	Since it's already tokenized, here's the token:
@@ -344,15 +345,17 @@ local function find_closet_flexible(v0, available)
 	end;
 	local closest;
 	local closestdelta = math.huge;
+	local v_weight = #v0 + (v0:find('MMM+') and 3 or 0);
 	for rf, rv in next, available do
 		local v1 = v0;
 		rf = rf:gsub('k', 'H'):gsub('K', 'h');
-		local delta = math.abs(#rf - #v0) + (#rf > #v0 and 1 or 0);
+		local rf_weight = #rf + (rf:find('MMM+') and 3 or 0);
+		local delta = math.abs(rf_weight - v_weight) + (rf_weight > v_weight and 1 or 0)
 		for chr in rf:gmatch(".") do
 			rf = rf:gsub(chr .. '+', chr);
 			v1 = v1:gsub(chr .. '+', chr);
 		end;
-		if (rf == v1) and (delta < closestdelta) then
+		if rf == v1 and delta < closestdelta then
 			closest = rv;
 			closestdelta = delta;
 		end;
@@ -367,7 +370,7 @@ local hourcycle_alias = { h12 = 'h', h23 = 'H', h11 = 'K', h24 = 'k', };
 
 local char_pattern_flexible_find = { { 'G', 'y', 'M', 'E', 'd' }, { 'E', 'H', 'm', 's' } };
 local flexible_find_size = { ['numeric'] = 1, ['2-digit'] = 2, ['long'] = 4, ['short'] = 3, ['narrow'] = 5 };
-local smallest_diff_char = { { 'second', 's' }, { 'minute', 'm' }, { 'hour', 'H' }, { 'day', 'd' }, { 'month', 'M' }, { 'year', 'y' }, { 'era', 'G' } };
+local biggest_diff_char = { { 'era', 'G' }, { 'year', 'y' }, { 'month', 'M' }, { 'day', 'd' }, { 'hour', 'H' }, { 'minute', 'm' }, { 'second', 's' } };
 
 local function joinformat(datetimef, timef, datef)
 	local ret = { };
@@ -591,20 +594,20 @@ local function format(self, parts, date0, date1)
 	local pattern;
 	local fallback = range and self.rangeFallback;
 	if range and not fallback then
-		local smallest_diff = 0;
-		for i = 1, 7 do
-			if info0[smallest_diff_char[i][1]] ~= info1[smallest_diff_char[i][1]]
-				and self.formatRange[smallest_diff_char[i][2]] then
-				smallest_diff = i;
+		local biggest_diff = 0;
+		for i, v in ipairs(biggest_diff_char) do
+			if info0[v[1]] ~= info1[v[1]]
+				and self.formatRange[v[2]] then
+				biggest_diff = i;
 				break;
 			end;
 		end;
-		if smallest_diff == 0 then
+		if biggest_diff == 0 then
 			fallback = true;
 			pattern = self.format;
 		else
-			smallest_diff = smallest_diff_char[smallest_diff][2];
-			pattern = self.formatRange[smallest_diff];
+			biggest_diff = biggest_diff_char[biggest_diff][2];
+			pattern = self.formatRange[biggest_diff];
 		end;
 	else
 		pattern = self.format;
