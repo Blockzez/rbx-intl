@@ -350,7 +350,6 @@ function c.options(ttype, locales, options)
 		check_property(ret, options, 'lf/style', 'long');
 		local p = data.listPatterns[(ret.type:gsub('disjunction', 'or'):gsub('conjunction', 'standard'))
 			.. (ret.style == "long" and '' or ('-' .. ret.style))];
-		ret.pattern = p;
 		ret.t, ret.s, ret.m, ret.e = c.tokenizeformat(p['2']), c.tokenizeformat(p['start']), c.tokenizeformat(p['middle']), c.tokenizeformat(p['end']);
 	elseif t == "sg" then
 		check_property(ret, options, 'sg/granularity', 'grapheme');
@@ -656,7 +655,7 @@ local function quantize(isneg, val, exp, rounding)
 	end;
 	return table.concat(d, '', 1, e - 1), table.concat(d, '', e);
 end;
-local function scale(val, exp)
+function c.scale(val, exp)
 	val = ('0'):rep(-exp) .. val .. ('0'):rep(exp);
 	local unscaled = (val:gsub("[.,]", ''));
 	local len = #val;
@@ -692,7 +691,7 @@ function c.raw_format_sig(negval, val, min, max, rounding)
 	intg = intg == '' and '0' or intg;
 	if max and max ~= math.huge then
 		val = intg .. '.' .. frac;
-		intg, frac = quantize(negval == '-', val, max - ((val:find('%.') or (#val + 1)) - 1) + #(val:gsub('%.', ''):match("^0+") or ''), rounding);
+		intg, frac = quantize(negval == '-', val, max - ((val:find('%.') or (#val + 1)) - 1) + #val:gsub('%.', ''):match("^0*"), rounding);
 		intg, frac = intg:gsub('^0+', ''), frac:gsub('0+$', '');
 		intg = intg == '' and '0' or intg;
 	end;
@@ -720,19 +719,16 @@ function c.parse_exp(val)
 		if val == '' then
 			return nil;
 		end;
-		return negt .. scale(val, exp);
+		return negt .. c.scale(val, exp);
 	end;
 	return nil;
 end;
-function c.num_to_str(value, scale_v)
+function c.num_to_str(value)
 	if type(value) == "number" then
 		value = (value % 1 == 0 and '%.0f' or '%.17f'):format(value);
 	else
 		value = tostring(value);
 		value = c.parse_exp(value) or value:lower();
-	end;
-	if scale_v then
-		value = scale(value, scale_v);
 	end;
 	return value;
 end;
