@@ -25,9 +25,6 @@ end;
 table.sort(u_extension_order, function(l, r)
 	return l[1] < r[1];
 end);
-local function sort_variant(l, r)
-	return l < r;
-end;
 
 local validOptions = {
 	region = true,
@@ -135,7 +132,7 @@ local function parse_identifier(identifier)
 	while check.variants(parts[1], true) do
 		table.insert(ret.variants, table.remove(parts, 1):lower());
 	end;
-	table.sort(ret.variants, sort_variant)
+	table.sort(ret.variants);
 	
 	-- An extra/invalid part
 	if parts[1] then
