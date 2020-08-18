@@ -2,6 +2,7 @@ local PluralRules = require(script.Parent:WaitForChild("PluralRules"));
 local checker = require(script.Parent:WaitForChild("_checker"));
 local intl_proxy = setmetatable({ }, checker.weaktable);
 local nf = { };
+local ipairs = ipairs;
 
 --[=[
 	https://unicode.org/reports/tr35/tr35-numbers.html#Number_Format_Patterns
@@ -89,8 +90,8 @@ end;
 
 --[=[ Formatter ]=]--
 function format(self, parts, value0, value1)
-	value0 = checker.num_to_str(value0, self.style == "percent" and 2);
-	value1 = value1 and checker.num_to_str(value1, self.style == "percent" and 2);
+	value0 = checker.num_to_str(value0);
+	value1 = value1 and checker.num_to_str(value1);
 	
 	local range = value1 ~= nil;
 	local ret0, ret1, rawvalue0, rawvalue1;
@@ -105,6 +106,9 @@ function format(self, parts, value0, value1)
 		local negt, post = value:match("^([+%-]?)(.+)$");
 		local rawvalue;
 		if post:match("^[%d.]*$") and select(2, post:gsub('%.', '')) < 2 then
+			if self.style == "percent" then
+				post = checker.scale(post, 2);
+			end;
 			local minfrac, maxfrac = self.minimumFractionDigits, self.maximumFractionDigits;
 			if self.notation == "compact" then
 				--[=[ Compact decimal formatting ]=]--
@@ -117,7 +121,7 @@ function format(self, parts, value0, value1)
 				local intlen = #post:gsub('%..*', '') - 3;
 				local compact_val = post;
 				-- Just in case, that pattern is '0'
-				-- Why max math.min 12? because 12 is the highest compact digits CLDR supported (trillion)
+				-- Why max math.min 12? because 12 is the highest compact digits CLDR supports (trillion)
 				-- But if this changes, I might use #self.compactPattern.other
 				if self.compactPattern.other[math.min(intlen, 12)] then
 					compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
@@ -126,7 +130,7 @@ function format(self, parts, value0, value1)
 					standardPattern = self.standardNPattern;
 				end;
 				if not (minfrac or maxfrac) then
-					maxfrac = math.max(2 - ((compact_val:find('%.') or (#compact_val + 1)) - 1) + #(compact_val:gsub('%.', ''):match("^0+") or ''), 0);
+					maxfrac = math.max(2 - ((compact_val:find('%.') or (#compact_val + 1)) - 1) + #compact_val:gsub('%.', ''):match("^0*"), 0);
 				end;
 				
 				local formatted_compact_val;
@@ -175,6 +179,15 @@ function format(self, parts, value0, value1)
 				else
 					post = checker.raw_format(negt, post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
 				end;
+				if #post:gsub("%.%d*$", '') > (self.notation == "engineering" and 3 or 1) then
+					post = checker.scale(post, self.notation == "engineering" and -3 or -1);
+					if self.isSignificant then
+						post = checker.raw_format_sig(negt, post, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
+					else
+						post = checker.raw_format(negt, post, self.minimumIntegerDigits, self.maximumIntegerDigits, minfrac, maxfrac, self.rounding);
+					end;
+					expt = tostring(expt + (self.notation == "engineering" and 3 or 1));
+				end;
 			end;
 		elseif (post ~= "inf") and (post ~= "infinity") then
 			post, rawvalue, negt = 'nan', 'nan', '';
@@ -199,7 +212,7 @@ function format(self, parts, value0, value1)
 		elseif self.notation == "standard" or self.notation == "compact" then
 			--[=[ Standard formatting ]=]--
 			local intg, frac = post:match("^(%d*)%.?(%d*)$");
-			local gs = self.useGrouping == "thousands" and { 3, 3 } or (self.useGrouping ~= "never" and (self.standardNPattern or standardPattern).metadata.integerGroupSize);
+			local gs =  ((self.useGrouping ~= "never" and self.useGrouping ~= "thousands") and (self.standardNPattern or standardPattern).metadata.integerGroupSize) or ((self.useGrouping == "always" or self.useGrouping == "thousands") and { 3, 3 });
 			if gs and (#intg >= gs[1] + self.minimumGroupingDigits) then
 				local sym = ((self.style == "currency" and self.symbols.currencyGroup) or self.symbols.group);
 				if parts or (sym:match("[%%%d]")) then
