@@ -55,6 +55,7 @@ function d.getlocaleparts(locale)
 		while parts[1] and (parts[1]:match("^%d%w%w%w$") or parts[1]:match("^%w%w%w%w%w%w?%w?%w?$")) do
 			table.insert(variants, table.remove(parts, 1):upper());
 		end;
+		table.sort(variants);
 		if #parts > 0 then
 			return nil;
 		end;
@@ -272,8 +273,6 @@ function d.exists(ttype, locale)
 	return not not (d.exists(d.negotiateparent(minimized)) or d.exists(d.negotiateparent(maximized))
 		or commons[ttype]:FindFirstChild(locale) or commons[ttype]:FindFirstChild(minimized) or commons[ttype]:FindFirstChild(maximized));
 end;
-
-assert(d.exists('main', 'en-US-POSIX'))
 
 d.supplemental = supplemental;
 
