@@ -120,11 +120,13 @@ function format(self, parts, value0, value1)
 				post = post:gsub('^0+', '');
 				local intlen = #post:gsub('%..*', '') - 3;
 				local compact_val = post;
+				local csize;
 				-- Just in case, that pattern is '0'
 				-- Why max math.min 12? because 12 is the highest compact digits CLDR supports (trillion)
 				-- But if this changes, I might use #self.compactPattern.other
 				if self.compactPattern.other[math.min(intlen, 12)] then
-					compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
+					csize = self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0);
+					compact_val = compact(post, csize);
 				-- The '0' pattern indicates no compact number available
 				elseif (self.style == "currency" and (self.currencyDisplay ~= "name")) or self.style == "percent" then
 					standardPattern = self.standardNPattern;
@@ -144,9 +146,12 @@ function format(self, parts, value0, value1)
 				if #formatted_compact_val:gsub("%.%d*$", ''):gsub('^0+', '') == #compact_val:gsub("%.%d*$", '') then
 					post = formatted_compact_val;
 				else
+					-- TODO: Impelement a better compact rounding
+					-- The gl locale doesn't have a compact pattern for 1 000 000 000
+					compact_val = checker.raw_format_sig(negt, post, 0, self.maximumSignificantDigits or csize or #compact_val:gsub("%.%d*$", '') , self.rounding);
 					intlen = intlen + 1;
 					if self.compactPattern.other[math.min(intlen, 12)] then
-						compact_val = compact(post, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0) - 1);
+						compact_val = compact(compact_val, self.compactPattern.other[math.min(intlen, 12)].size + math.max(intlen - 12, 0));
 					end;
 					if self.isSignificant then
 						post = checker.raw_format_sig(negt, compact_val, self.minimumSignificantDigits, self.maximumSignificantDigits, self.rounding);
@@ -328,7 +333,7 @@ function format(self, parts, value0, value1)
 	end;
 	--
 	local ret = ret1 and (parts and checker.formattoparts(nil, checker.initializepart(), self.rangePattern, 'shared', ret0, ret1)
-			or self.rangePattern:gsub('{0}', table.concat(ret0)):gsub('{1}', table.concat(ret1)))
+			or self.rangePattern:gsub('{[01]}', { ['{0}'] = table.concat(ret0), ['{1}'] = table.concat(ret1) }))
 		or (parts and ret0 or table.concat(ret0));
 	if self.style ~= "unit" and (self.style ~= "currency" or self.currencyDisplay ~= "name") then
 		return parts and setmetatable(ret, nil) or ret;
@@ -336,13 +341,13 @@ function format(self, parts, value0, value1)
 	local unitPattern = checker.negotiate_plural_table(self.unitPattern, self.pluralRule, rawvalue0, rawvalue1);
 	local currencyName = (self.currencyData and checker.negotiate_plural_table(self.currencyData, self.pluralRule, rawvalue0, rawvalue1));
 	local unit0 = parts and checker.formattoparts(self.style == "unit" and "unit", checker.initializepart(), unitPattern, range and 'shared' or nil, ret, currencyName and { type = "currency", value = currencyName })
-		or (unitPattern:gsub('{0}', ret):gsub('{1}', currencyName or self.currency or ''));
+		or (unitPattern:gsub('{[01]}', { ['{0}'] = ret, ['{1}'] = currencyName or self.currency or '' }));
 	if self.compoundUnitPattern then
 		if self.unitPattern1.perUnitPattern then
 			return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, range and 'shared' or nil, unit0), nil) or (self.unitPattern1.perUnitPattern:gsub('{0}', unit0 or ''));
 		end;
 		local unit1 = checker.negotiate_plural_table(self.unitPattern1, self.pluralRule, 1):gsub('%s*{0}%s*', '');
-		return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, range and 'shared' or nil, unit0, unit1), nil) or (self.compoundUnitPattern:gsub('{0}', unit0 or ''):gsub('{1}', unit1 or ''));
+		return parts and setmetatable(checker.formattoparts("unit", checker.initializepart(), unitPattern, range and 'shared' or nil, unit0, unit1), nil) or self.compoundUnitPattern:gsub('{[01]}', { ['{0}'] = unit0 or '', ['{1}'] = unit1 or '' });
 	end;
 	return parts and setmetatable(unit0, nil) or unit0;
 end;
