@@ -12,7 +12,7 @@ local function negotiate_table(tbl, index, style)
 	if index == nil then
 		return nil;
 	end;
-	return (style == "narrow" and tbl[index .. '-alt-narrow']) or ((style == "short" or style == "narrow") and tbl[index .. '-alt-short']) or tbl[index]
+	return (style == "narrow" and tbl[index .. '-narrow']) or ((style == "short" or style == "narrow") and tbl[index .. '-short']) or tbl[index];
 end;
 
 local function checkvalid(code, type)
@@ -57,47 +57,44 @@ local function parselangugage(displaynames, pattern, code, style, fallback)
 		end;
 		pattern0 = language;
 	end;
-	if not fallback then
-		if script and not displaynames.scripts[script] then
-			return nil;
-		elseif region and not displaynames.territories[region] then
-			return nil;
-		end;
-	end;
 	local pattern1;
 	for _, v in ipairs {
 			negotiate_table(displaynames.scripts, script, style) or (fallback and script) or false,
 			negotiate_table(displaynames.territories, region, style) or (fallback and region) or false } do
 		if v then
 			if pattern1 then
-				pattern1 = pattern.localeSeparator:gsub('{0}', pattern1):gsub('{1}', v);
+				pattern1 = pattern.localeSeparator:gsub('{[01]}', { ['{0}'] = pattern1, ['{1}'] = v });
 			else
 				pattern1 = v;
 			end;
+		elseif not fallback then
+			return nil;
 		end;
 	end;
 	for _, v in ipairs(variants) do
 		v = negotiate_table(displaynames.variants, v:upper(), style) or (fallback and v);
 		if v then
 			if pattern1 then
-				pattern1 = pattern.localeSeparator:gsub('{0}', pattern1):gsub('{1}', v);
+				pattern1 = pattern.localeSeparator:gsub('{[01]}', { ['{0}'] = pattern1, ['{1}'] = v });
 			else
 				pattern1 = v;
 			end;
+		elseif not fallback then
+			return nil;
 		end;
 	end;
-	return pattern1 and pattern.localePattern:gsub('{0}', pattern0):gsub('{1}', pattern1) or pattern0;
+	return pattern1 and pattern.localePattern:gsub('{[01]}', { ['{0}'] = pattern0, ['{1}'] = pattern1 }) or pattern0;
 end;
 
 local function of(self, code)
 	if self.type == "language" then
 		if type(code) ~= "string" and not Locale._private.intl_proxy[code] then
-			error("invalid argument #3 (string expected got " .. typeof(code) .. ')', 4);
+			error("invalid argument #1 (string/Locale expected got " .. typeof(code) .. ')', 4);
 		end;
 		return parselangugage(self.data, self.pattern, code, self.style, self.fallback == "code");
 	end;
 	if type(code) ~= "string" then
-		error("invalid argument #3 (string expected got " .. typeof(code) .. ')', 4);
+		error("invalid argument #1 (string expected got " .. typeof(code) .. ')', 4);
 	end;
 	code = checkvalid(code, self.type);
 	local ret = negotiate_table(self.data, code, self.style) or (self.fallback == "code" and code) or nil;
