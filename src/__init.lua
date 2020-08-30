@@ -1,5 +1,5 @@
 --[=[
-	Version 2.5.1
+	Version 2.5.2
 	This is intended for Roblox ModuleScripts
 	BSD 2-Clause Licence
 	Copyright ©, 2020 - Blockzez (devforum.roblox.com/u/Blockzez and github.com/Blockzez)
@@ -162,7 +162,7 @@ function modules.toLocaleString(...)
 		option.format = private.DateTimeFormat.find_format(option, false);
 		return private.DateTimeFormat.format(option, false, value);
 	elseif type == 'list' then
-		return (private.NumberFormat.format(checker.options('lf', locale, options), false, value));
+		return (private.ListFormat.format(checker.options('lf', locale, options), false, value));
 	elseif type == 'function' or type == 'thread' or type == "userdata" then
 		return '';
 	end;
